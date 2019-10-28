@@ -1,0 +1,10 @@
+# Catkin files
+.catkin_tools/
+
+# Build results
+[Bb]uild/
+[Dd]evel/
+[Ii]nstall/
+
+# Log files
+[Ll]ogs/
