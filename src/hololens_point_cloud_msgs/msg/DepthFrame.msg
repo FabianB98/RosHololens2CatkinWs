@@ -1,0 +1,5 @@
+int32 depthMapWidth
+int32 depthMapHeight
+int32 depthMapPixelStride
+string base64encodedDepthMap
+Matrix camToWorld

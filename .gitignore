@@ -1,6 +1,9 @@
 # Catkin files
 .catkin_tools/
 
+# VS Code files
+src/.vscode/
+
 # Build results
 [Bb]uild/
 [Dd]evel/

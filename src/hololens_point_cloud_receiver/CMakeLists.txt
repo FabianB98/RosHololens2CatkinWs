@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   pcl_conversions
   pcl_ros
+  rqt_image_view
 )
 
 ## System dependencies are found with CMake's conventions
@@ -154,7 +155,7 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
-add_executable(listener src/listener.cpp)
+add_executable(listener src/Main.cpp src/PointCloudReceiver.cpp src/DepthMap.cpp src/Base64.cpp)
 target_link_libraries(listener ${catkin_LIBRARIES})
 #############
 ## Install ##

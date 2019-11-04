@@ -1,4 +1,6 @@
 <launch>
   <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
   <node name="PointCloudListener" pkg="hololens_point_cloud_receiver" type="listener" output="screen"/>
+  <node name="ShortThrowDepthImage" pkg="rqt_image_view" type="rqt_image_view" args="/hololensShortThrowImage"/>
+  <node name="LongThrowDepthImage" pkg="rqt_image_view" type="rqt_image_view" args="/hololensLongThrowImage"/>
 </launch>

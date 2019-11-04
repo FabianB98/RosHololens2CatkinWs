@@ -50,9 +50,12 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate messages in the 'msg' folder
 add_message_files(
   FILES
-  PointCloud.msg
-  Point.msg
+  DepthFrame.msg
   Matrix.msg
+  PixelDirection.msg
+  PixelDirections.msg
+  Point.msg
+  PointCloud.msg
 )
 
 ## Generate services in the 'srv' folder
