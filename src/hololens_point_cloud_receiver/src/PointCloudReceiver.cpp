@@ -15,14 +15,14 @@ void PointCloudReceiver::handleShortThrowDepthFrame(const hololens_point_cloud_m
 {
     ROS_INFO("Received a short throw depth frame!");
     handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
-            shortThrowImagePublisher, &shortThrowSequenceNumber, "short_throw_point_cloud");
+            shortThrowImagePublisher, &shortThrowSequenceNumber, "short_throw_point_cloud", shortThrowPointClouds, MAX_SHORT_THROW_POINT_CLOUDS);
 }
 
 void PointCloudReceiver::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
     handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
-            longThrowImagePublisher, &longThrowSequenceNumber, "long_throw_point_cloud");
+            longThrowImagePublisher, &longThrowSequenceNumber, "long_throw_point_cloud", longThrowPointClouds, MAX_LONG_THROW_POINT_CLOUDS);
 }
 
 void PointCloudReceiver::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
@@ -44,7 +44,9 @@ void PointCloudReceiver::handleDepthFrame(
     const float maxReliableDepth,
     const ros::Publisher& imagePublisher,
     uint32_t* sequenceNumber,
-    const std::string pointCloudName)
+    const std::string pointCloudName,
+    std::deque<pcl::PointCloud<pcl::PointXYZ>::Ptr>& pointClouds,
+    uint32_t maxPointClouds)
 {
     // Decode the depth map.
     std::string decoded = base64_decode(depthFrame->base64encodedDepthMap);
@@ -105,7 +107,15 @@ void PointCloudReceiver::handleDepthFrame(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, transform);
 
+    // Concatenate the point clouds.
+    pointClouds.push_back(pointCloudWorldSpace);
+    if (pointClouds.size() > maxPointClouds)
+        pointClouds.pop_front();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudsConcatenated (new pcl::PointCloud<pcl::PointXYZ>());
+    for (uint32_t i = 0; i < pointClouds.size(); ++i)
+        (*pointCloudsConcatenated) += (*pointClouds[i]);
+
     // Visualize the point cloud.
     if (pointCloudName.size() > 0)
-        cloudViewer.showCloud(pointCloudWorldSpace, pointCloudName);
+        cloudViewer.showCloud(pointCloudsConcatenated, pointCloudName);
 }

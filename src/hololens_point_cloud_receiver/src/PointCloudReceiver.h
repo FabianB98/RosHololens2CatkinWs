@@ -34,6 +34,9 @@
 #define SHORT_THROW_IMAGE_TOPIC "/hololensShortThrowImage"
 #define LONG_THROW_IMAGE_TOPIC "/hololensLongThrowImage"
 
+#define MAX_SHORT_THROW_POINT_CLOUDS 30
+#define MAX_LONG_THROW_POINT_CLOUDS 10
+
 class PointCloudReceiver
 {
 public:
@@ -52,7 +55,9 @@ private:
         const float maxReliableDepth,
         const ros::Publisher& imagePublisher,
         uint32_t* sequenceNumber,
-        const std::string pointCloudName);
+        const std::string pointCloudName,
+        std::deque<pcl::PointCloud<pcl::PointXYZ>::Ptr>& pointClouds,
+        uint32_t maxPointClouds);
 
 private:
     hololens_point_cloud_msgs::PixelDirections::ConstPtr shortThrowDirections;
@@ -63,4 +68,7 @@ private:
 
     uint32_t shortThrowSequenceNumber;
     uint32_t longThrowSequenceNumber;
+
+    std::deque<pcl::PointCloud<pcl::PointXYZ>::Ptr> shortThrowPointClouds;
+    std::deque<pcl::PointCloud<pcl::PointXYZ>::Ptr> longThrowPointClouds;
 };
