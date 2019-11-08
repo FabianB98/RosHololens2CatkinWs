@@ -34,8 +34,8 @@
 #define SHORT_THROW_IMAGE_TOPIC "/hololensShortThrowImage"
 #define LONG_THROW_IMAGE_TOPIC "/hololensLongThrowImage"
 
-#define MAX_SHORT_THROW_POINT_CLOUDS 30
-#define MAX_LONG_THROW_POINT_CLOUDS 10
+#define MAX_SHORT_THROW_POINT_CLOUDS 5
+#define MAX_LONG_THROW_POINT_CLOUDS 30
 
 class PointCloudReceiver
 {
