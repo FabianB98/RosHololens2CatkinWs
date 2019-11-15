@@ -38,7 +38,7 @@ void PointCloudReceiver::handleLongThrowPixelDirections(const hololens_point_clo
 }
 
 void PointCloudReceiver::handleDepthFrame(
-    const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
+    const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame,
     const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
     const float minReliableDepth,
     const float maxReliableDepth,
@@ -84,25 +84,15 @@ void PointCloudReceiver::handleDepthFrame(
 
     // Transform the point cloud from camera space to world space.
     Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-    transform(0, 0) = depthFrame->camToWorld.m11;
-    transform(1, 0) = depthFrame->camToWorld.m12;
-    transform(2, 0) = depthFrame->camToWorld.m13;
-    transform(3, 0) = depthFrame->camToWorld.m14;
-
-    transform(0, 1) = depthFrame->camToWorld.m21;
-    transform(1, 1) = depthFrame->camToWorld.m22;
-    transform(2, 1) = depthFrame->camToWorld.m23;
-    transform(3, 1) = depthFrame->camToWorld.m24;
-
-    transform(0, 2) = depthFrame->camToWorld.m31;
-    transform(1, 2) = depthFrame->camToWorld.m32;
-    transform(2, 2) = depthFrame->camToWorld.m33;
-    transform(3, 2) = depthFrame->camToWorld.m34;
-
-    transform(0, 3) = depthFrame->camToWorld.m41;
-    transform(1, 3) = depthFrame->camToWorld.m42;
-    transform(2, 3) = depthFrame->camToWorld.m43;
-    transform(3, 3) = depthFrame->camToWorld.m44;
+    transform.block(0, 0, 3, 3) = Eigen::Quaternionf(
+        depthFrame->camToWorldRotation.w,
+        depthFrame->camToWorldRotation.x,
+        depthFrame->camToWorldRotation.y,
+        depthFrame->camToWorldRotation.z
+    ).toRotationMatrix().transpose();
+    transform(0, 3) = depthFrame->camToWorldTranslation.x;
+    transform(1, 3) = depthFrame->camToWorldTranslation.y;
+    transform(2, 3) = depthFrame->camToWorldTranslation.z;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, transform);
