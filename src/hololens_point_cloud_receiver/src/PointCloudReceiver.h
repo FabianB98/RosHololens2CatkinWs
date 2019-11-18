@@ -1,4 +1,6 @@
 #include <string>
+#include <deque>
+
 #include "Base64.h"
 
 #include "ros/ros.h"
@@ -15,9 +17,6 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/common/transforms.h>
-#include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/visualization/cloud_viewer.h>
 
 #define SHORT_THROW_MIN_RELIABLE_DEPTH 0.2f
 #define SHORT_THROW_MAX_RELIABLE_DEPTH 1.0f
@@ -35,7 +34,7 @@
 #define LONG_THROW_IMAGE_TOPIC "/hololensLongThrowImage"
 
 #define MAX_SHORT_THROW_POINT_CLOUDS 5
-#define MAX_LONG_THROW_POINT_CLOUDS 30
+#define MAX_LONG_THROW_POINT_CLOUDS 60
 
 class PointCloudReceiver
 {

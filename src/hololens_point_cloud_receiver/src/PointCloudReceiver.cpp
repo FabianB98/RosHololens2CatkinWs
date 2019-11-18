@@ -1,12 +1,19 @@
 #include "PointCloudReceiver.h"
 #include "DepthMap.h"
 
+#include <pcl/common/transforms.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/visualization/cloud_viewer.h>
+
 pcl::visualization::CloudViewer cloudViewer("Point cloud");
 
 PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
 {
     ROS_INFO("Creating PointCloudReceiver...");
 
+    // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(SHORT_THROW_IMAGE_TOPIC, 10);
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(LONG_THROW_IMAGE_TOPIC, 10);
 }
@@ -38,7 +45,7 @@ void PointCloudReceiver::handleLongThrowPixelDirections(const hololens_point_clo
 }
 
 void PointCloudReceiver::handleDepthFrame(
-    const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame,
+    const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
     const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
     const float minReliableDepth,
     const float maxReliableDepth,
@@ -82,12 +89,33 @@ void PointCloudReceiver::handleDepthFrame(
         pointCloudCamSpace->push_back(pcl::PointXYZ(-dir.direction.x * depth, -dir.direction.y * depth, -dir.direction.z * depth));
     }
 
+    // Downsample the point cloud to reduce the amount of processing time needed for removing outliers.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceDownsampled (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::VoxelGrid<pcl::PointXYZ> voxelGrid;
+    voxelGrid.setInputCloud(pointCloudCamSpace);
+    voxelGrid.setLeafSize(0.01f, 0.01f, 0.01f);
+    voxelGrid.filter(*pointCloudCamSpaceDownsampled);
+
+    // TODO: Remove the following line of code later on.
+    ROS_INFO("Downsampled %zu points to %zu points.", pointCloudCamSpace->size(), pointCloudCamSpaceDownsampled->size());
+
+    // Remove outliers from the point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceFiltered (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statisticalOutlierRemoval;
+    statisticalOutlierRemoval.setInputCloud(pointCloudCamSpaceDownsampled);
+    statisticalOutlierRemoval.setMeanK(10);
+    statisticalOutlierRemoval.setStddevMulThresh(1.0);
+    statisticalOutlierRemoval.filter(*pointCloudCamSpaceFiltered);
+
+    // TODO: Remove the following line of code later on.
+    ROS_INFO("Found %zu outliers.", pointCloudCamSpaceDownsampled->size() - pointCloudCamSpaceFiltered->size());
+
     // Transform the point cloud from camera space to world space.
     Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
     transform.block(0, 0, 3, 3) = Eigen::Quaternionf(
-        depthFrame->camToWorldRotation.w,
-        depthFrame->camToWorldRotation.x,
-        depthFrame->camToWorldRotation.y,
+        depthFrame->camToWorldRotation.w, 
+        depthFrame->camToWorldRotation.x, 
+        depthFrame->camToWorldRotation.y, 
         depthFrame->camToWorldRotation.z
     ).toRotationMatrix().transpose();
     transform(0, 3) = depthFrame->camToWorldTranslation.x;
@@ -95,7 +123,7 @@ void PointCloudReceiver::handleDepthFrame(
     transform(2, 3) = depthFrame->camToWorldTranslation.z;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, transform);
+    pcl::transformPointCloud(*pointCloudCamSpaceFiltered, *pointCloudWorldSpace, transform);
 
     // Concatenate the point clouds.
     pointClouds.push_back(pointCloudWorldSpace);
