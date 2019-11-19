@@ -11,3 +11,6 @@ src/.vscode/
 
 # Log files
 [Ll]ogs/
+
+# Other compiled files
+*.pyc
