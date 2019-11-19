@@ -13,6 +13,9 @@ PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
 {
     ROS_INFO("Creating PointCloudReceiver...");
 
+    // Initialize the point cloud.
+    pointCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
+
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(SHORT_THROW_IMAGE_TOPIC, 10);
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(LONG_THROW_IMAGE_TOPIC, 10);
@@ -22,25 +25,25 @@ void PointCloudReceiver::handleShortThrowDepthFrame(const hololens_point_cloud_m
 {
     ROS_INFO("Received a short throw depth frame!");
     handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
-            shortThrowImagePublisher, &shortThrowSequenceNumber, "short_throw_point_cloud", shortThrowPointClouds, MAX_SHORT_THROW_POINT_CLOUDS);
+            shortThrowImagePublisher, &shortThrowSequenceNumber);
 }
 
 void PointCloudReceiver::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
     handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
-            longThrowImagePublisher, &longThrowSequenceNumber, "long_throw_point_cloud", longThrowPointClouds, MAX_LONG_THROW_POINT_CLOUDS);
+            longThrowImagePublisher, &longThrowSequenceNumber);
 }
 
 void PointCloudReceiver::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
 {
-    ROS_INFO("Received short throw pixel directions!");
+    ROS_INFO("Received %zu short throw pixel directions!", msg->pixelDirections.size());
     shortThrowDirections = msg;
 }
 
 void PointCloudReceiver::handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
 {
-    ROS_INFO("Received long throw pixel directions!");
+    ROS_INFO("Received %zu long throw pixel directions!", msg->pixelDirections.size());
     longThrowDirections = msg;
 }
 
@@ -50,10 +53,7 @@ void PointCloudReceiver::handleDepthFrame(
     const float minReliableDepth,
     const float maxReliableDepth,
     const ros::Publisher& imagePublisher,
-    uint32_t* sequenceNumber,
-    const std::string pointCloudName,
-    std::deque<pcl::PointCloud<pcl::PointXYZ>::Ptr>& pointClouds,
-    uint32_t maxPointClouds)
+    uint32_t* sequenceNumber)
 {
     // Decode the depth map.
     std::string decoded = base64_decode(depthFrame->base64encodedDepthMap);
@@ -93,7 +93,7 @@ void PointCloudReceiver::handleDepthFrame(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceDownsampled (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::VoxelGrid<pcl::PointXYZ> voxelGrid;
     voxelGrid.setInputCloud(pointCloudCamSpace);
-    voxelGrid.setLeafSize(0.01f, 0.01f, 0.01f);
+    voxelGrid.setLeafSize(DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE);
     voxelGrid.filter(*pointCloudCamSpaceDownsampled);
 
     // TODO: Remove the following line of code later on.
@@ -125,15 +125,31 @@ void PointCloudReceiver::handleDepthFrame(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpaceFiltered, *pointCloudWorldSpace, transform);
 
-    // Concatenate the point clouds.
-    pointClouds.push_back(pointCloudWorldSpace);
-    if (pointClouds.size() > maxPointClouds)
-        pointClouds.pop_front();
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudsConcatenated (new pcl::PointCloud<pcl::PointXYZ>());
-    for (uint32_t i = 0; i < pointClouds.size(); ++i)
-        (*pointCloudsConcatenated) += (*pointClouds[i]);
+    // Concatenate the point clouds (i.e. add the new point cloud calculated from the new depth frame to the point cloud
+    // calculated from the previous frames).
+    *pointCloud += *pointCloudWorldSpace;
+
+    // Downsample the concatenated point cloud to avoid a point density which is higher than what is needed.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud2 (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::VoxelGrid<pcl::PointXYZ> voxelGrid2;
+    voxelGrid2.setInputCloud(pointCloud);
+    voxelGrid2.setLeafSize(DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE);
+    voxelGrid2.filter(*pointCloud2);
+    pointCloud = pointCloud2;
+
+    ROS_INFO("Total point cloud consists of %zu points.", pointCloud->size());
 
     // Visualize the point cloud.
-    if (pointCloudName.size() > 0)
-        cloudViewer.showCloud(pointCloudsConcatenated, pointCloudName);
+    cloudViewer.showCloud(pointCloud, "point_cloud");
+}
+
+void PointCloudReceiver::clearPointCloud()
+{
+    ROS_INFO("Clearing point cloud...");
+    pointCloud->clear();
+}
+
+void PointCloudReceiver::savePointCloud()
+{
+    ROS_INFO("Saving point cloud...");
 }

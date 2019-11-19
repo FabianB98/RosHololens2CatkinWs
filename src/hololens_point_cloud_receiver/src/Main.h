@@ -8,3 +8,6 @@ void shortThrowDepthFrameCallback(const hololens_point_cloud_msgs::DepthFrame::C
 void longThrowDepthFrameCallback(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg);
 void shortThrowPixelDirectionsCallback(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 void longThrowPixelDirectionsCallback(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
+
+void clearPointCloudCallback(const std_msgs::Bool::ConstPtr& msg);
+void savePointCloudCallback(const std_msgs::Bool::ConstPtr& msg);
