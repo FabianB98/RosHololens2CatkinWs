@@ -2,11 +2,14 @@
 
 #include "Base64.h"
 
+#include <boost/thread/mutex.hpp>
+
 #include "ros/ros.h"
 #include "std_msgs/Bool.h"
 #include "std_msgs/Header.h"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
+#include "sensor_msgs/PointCloud2.h"
 
 #include "hololens_point_cloud_msgs/DepthFrame.h"
 #include "hololens_point_cloud_msgs/Matrix.h"
@@ -38,6 +41,8 @@
 #define CLEAR_POINT_CLOUD_TOPIC "/clearPointCloud"
 #define SAVE_POINT_CLOUD_TOPIC "/savePointCloud"
 
+#define POINT_CLOUD_TOPIC "/pointCloud"
+
 class PointCloudReceiver
 {
 public:
@@ -66,9 +71,12 @@ private:
 
     ros::Publisher shortThrowImagePublisher;
     ros::Publisher longThrowImagePublisher;
+    ros::Publisher pointCloudPublisher;
 
     uint32_t shortThrowSequenceNumber;
     uint32_t longThrowSequenceNumber;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud;
+
+    boost::mutex pointCloudMutex;
 };

@@ -4,10 +4,8 @@
 #include <pcl/common/transforms.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
-#include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/visualization/cloud_viewer.h>
 
-pcl::visualization::CloudViewer cloudViewer("Point cloud");
+#include <pcl_conversions/pcl_conversions.h>
 
 PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
 {
@@ -19,6 +17,7 @@ PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(SHORT_THROW_IMAGE_TOPIC, 10);
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(LONG_THROW_IMAGE_TOPIC, 10);
+    pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(POINT_CLOUD_TOPIC, 10);
 }
 
 void PointCloudReceiver::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
@@ -63,7 +62,7 @@ void PointCloudReceiver::handleDepthFrame(
     sensor_msgs::Image image;
     image.header.seq = (*sequenceNumber)++;
     image.header.stamp = ros::Time::now();
-    image.header.frame_id = "";
+    image.header.frame_id = "hololens";
     image.height = depthFrame->depthMapHeight;
     image.width = depthFrame->depthMapWidth;
     image.encoding = sensor_msgs::image_encodings::MONO8;
@@ -127,6 +126,7 @@ void PointCloudReceiver::handleDepthFrame(
 
     // Concatenate the point clouds (i.e. add the new point cloud calculated from the new depth frame to the point cloud
     // calculated from the previous frames).
+    pointCloudMutex.lock();
     *pointCloud += *pointCloudWorldSpace;
 
     // Downsample the concatenated point cloud to avoid a point density which is higher than what is needed.
@@ -136,17 +136,24 @@ void PointCloudReceiver::handleDepthFrame(
     voxelGrid2.setLeafSize(DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE, DOWNSAMPLING_LEAF_SIZE);
     voxelGrid2.filter(*pointCloud2);
     pointCloud = pointCloud2;
+    pointCloudMutex.unlock();
 
-    ROS_INFO("Total point cloud consists of %zu points.", pointCloud->size());
+    ROS_INFO("Total point cloud consists of %zu points.", pointCloud2->size());
 
-    // Visualize the point cloud.
-    cloudViewer.showCloud(pointCloud, "point_cloud");
+    // Publish the point cloud.
+    sensor_msgs::PointCloud2 pointCloudMessage;
+    pcl::toROSMsg(*pointCloud2, pointCloudMessage);
+    pointCloudMessage.header = image.header;
+    pointCloudPublisher.publish(pointCloudMessage);
 }
 
 void PointCloudReceiver::clearPointCloud()
 {
     ROS_INFO("Clearing point cloud...");
+
+    pointCloudMutex.lock();
     pointCloud->clear();
+    pointCloudMutex.unlock();
 }
 
 void PointCloudReceiver::savePointCloud()

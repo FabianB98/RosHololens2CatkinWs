@@ -16,10 +16,9 @@ int main(int argc, char **argv)
 
     pointCloudReceiver = new PointCloudReceiver(n);
 
-    // // Perform the update loop using a multi threaded spinner with an amount of threads equal to the core count of the CPU.
-    // ros::MultiThreadedSpinner spinner(0);
-    // spinner.spin();
-    ros::spin();
+    // Perform the update loop using a multi threaded spinner with an amount of threads equal to the core count of the CPU.
+    ros::MultiThreadedSpinner spinner(0);
+    spinner.spin();
 
     // Clean up.
     delete pointCloudReceiver;
