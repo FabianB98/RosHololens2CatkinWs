@@ -8,7 +8,7 @@ public:
     DepthMap(std::string _data, uint32_t _width, uint32_t _height, uint32_t _pixelStride, bool bigEndian);
     DepthMap(std::vector<uint8_t> _data, uint32_t _width, uint32_t _height, uint32_t _pixelStride, bool bigEndian);
 
-    uint32_t valueAt(uint32_t u, uint32_t v);
+    uint32_t valueAt(uint32_t u, uint32_t v) const;
 
 public:
     const uint32_t width;

@@ -1,6 +1,7 @@
 #include <string>
 
 #include "Base64.h"
+#include "DepthMap.h"
 
 #include <boost/thread/mutex.hpp>
 
@@ -10,6 +11,7 @@
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
 #include "sensor_msgs/PointCloud2.h"
+#include "geometry_msgs/PointStamped.h"
 
 #include "hololens_point_cloud_msgs/DepthFrame.h"
 #include "hololens_point_cloud_msgs/Matrix.h"
@@ -27,8 +29,6 @@
 #define LONG_THROW_MIN_RELIABLE_DEPTH 0.5f
 #define LONG_THROW_MAX_RELIABLE_DEPTH 4.0f
 
-#define DOWNSAMPLING_LEAF_SIZE 0.01f
-
 #define SHORT_THROW_PIXEL_DIRECTIONS_TOPIC "/hololensShortThrowPixelDirections"
 #define LONG_THROW_PIXEL_DIRECTIONS_TOPIC "/hololensLongThrowPixelDirections"
 
@@ -41,6 +41,7 @@
 #define CLEAR_POINT_CLOUD_TOPIC "/clearPointCloud"
 #define SAVE_POINT_CLOUD_TOPIC "/savePointCloud"
 
+#define HOLOLENS_POSITION_TOPIC "/hololensPosition"
 #define POINT_CLOUD_TOPIC "/pointCloud"
 
 class PointCloudReceiver
@@ -65,6 +66,36 @@ private:
         const ros::Publisher& imagePublisher,
         uint32_t* sequenceNumber);
 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr computePointCloudFromDepthMap(
+        const DepthMap depthMap, 
+        const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
+        const float minReliableDepth,
+        const float maxReliableDepth);
+
+    Eigen::Matrix4f computeCamToWorldFromDepthFrame(
+        const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr downsamplePointCloud(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
+        const float leafSize);
+    
+    pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliers(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+        const float numNeighborsToCheck,
+        const float standardDeviationMultiplier);
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr registerPointCloud(
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
+        Eigen::Matrix4f camToWorld);
+
+    void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+    void publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
+    void publishDepthImage(
+        const DepthMap depthMap, 
+        const ros::Publisher& publisher, 
+        uint32_t* sequenceNumber,
+        const float maxReliableDepth);
+
 private:
     hololens_point_cloud_msgs::PixelDirections::ConstPtr shortThrowDirections;
     hololens_point_cloud_msgs::PixelDirections::ConstPtr longThrowDirections;
@@ -72,9 +103,11 @@ private:
     ros::Publisher shortThrowImagePublisher;
     ros::Publisher longThrowImagePublisher;
     ros::Publisher pointCloudPublisher;
+    ros::Publisher hololensPositionPublisher;
 
     uint32_t shortThrowSequenceNumber;
     uint32_t longThrowSequenceNumber;
+    uint32_t pointCloudSequenceNumber;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud;
 

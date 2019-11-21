@@ -6,7 +6,7 @@ DepthMap::DepthMap(std::string _data, uint32_t _width, uint32_t _height, uint32_
 DepthMap::DepthMap(std::vector<uint8_t> _data, uint32_t _width, uint32_t _height, uint32_t _pixelStride, bool _bigEndian)
     : data(_data), width(_width), height(_height), pixelStride(_pixelStride), bigEndian(_bigEndian) {}
 
-uint32_t DepthMap::valueAt(uint32_t u, uint32_t v)
+uint32_t DepthMap::valueAt(uint32_t u, uint32_t v) const
 {
     uint32_t index = (u + v * width) * pixelStride;
     
