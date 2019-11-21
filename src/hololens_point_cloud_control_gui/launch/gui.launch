@@ -1,0 +1,4 @@
+<launch>
+  <node name="hololens_rviz_tf" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0 1.5707963 /map /hololens 100"/>
+  <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find hololens_point_cloud_control_gui)/resource/GUI.perspective" output="screen"/>
+</launch>
