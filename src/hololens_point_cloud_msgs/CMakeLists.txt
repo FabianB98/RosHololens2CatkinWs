@@ -56,6 +56,7 @@ add_message_files(
   PixelDirections.msg
   Point.msg
   PointCloud.msg
+  Quaternion.msg
 )
 
 ## Generate services in the 'srv' folder
