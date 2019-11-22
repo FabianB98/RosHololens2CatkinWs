@@ -24,8 +24,8 @@ PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
 void PointCloudReceiver::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a short throw depth frame!");
-    handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
-            shortThrowImagePublisher, &shortThrowSequenceNumber);
+    // handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
+    //         shortThrowImagePublisher, &shortThrowSequenceNumber);
 }
 
 void PointCloudReceiver::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
@@ -59,6 +59,11 @@ void PointCloudReceiver::handleDepthFrame(
     std::string decoded = base64_decode(depthFrame->base64encodedDepthMap);
     DepthMap depthMap = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight, depthFrame->depthMapPixelStride, false);
 
+    // Publish the depth map as well as the current position of the HoloLens.
+    publishHololensPosition(depthFrame);
+    publishHololensCamToWorldTf(depthFrame);
+    publishDepthImage(depthMap, imagePublisher, sequenceNumber, maxReliableDepth);
+
     // Calculate the point cloud (in camera space).
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = 
         computePointCloudFromDepthMap(depthMap, pixelDirections, minReliableDepth, maxReliableDepth);
@@ -82,10 +87,8 @@ void PointCloudReceiver::handleDepthFrame(
     // TODO: Remove the following line of code later on...
     ROS_INFO("Total point cloud consists of %zu points.", combinedPointCloud->size());
 
-    // Publish the results.
+    // Publish the point cloud.
     publishPointCloud(combinedPointCloud);
-    publishHololensPosition(depthFrame);
-    publishDepthImage(depthMap, imagePublisher, sequenceNumber, maxReliableDepth);
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::computePointCloudFromDepthMap(
@@ -180,12 +183,48 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::registerPointCloud(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
     Eigen::Matrix4f camToWorld)
 {
-    // Transform the point cloud from camera space to world space.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
-
     // Lock the point cloud mutex as we're about to start the registration of the new point cloud.
     pointCloudMutex.lock();
+
+    // Transform the point cloud from camera space to world space.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    if (pointCloud->size() != 0) 
+    {
+        // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
+        // align the given point cloud to the global point cloud.
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+
+        // Set the parameters for ICP.
+        icp.setMaximumIterations(1);
+        icp.setTransformationEpsilon(1e-12);
+        icp.setMaxCorrespondenceDistance(0.2);
+        icp.setRANSACOutlierRejectionThreshold(0.0001);
+        icp.setEuclideanFitnessEpsilon(1);
+
+        // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
+        icp.setInputSource(pointCloudCamSpace);
+        icp.setInputTarget(pointCloud);
+
+        // Align the new point cloud using the camera to world transformation as an initial guess.
+        icp.align(*pointCloudWorldSpace, camToWorld);
+
+        unsigned int iteration = 1;
+        while (!icp.hasConverged() && iteration < 20)
+        {
+            icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
+            iteration++;
+        }
+
+        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+        ROS_INFO("Num iterations: %u", iteration);
+        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+    }
+    else 
+    {
+        // There is no global point cloud yet, so we don't need to align the given point cloud. Simply transform the
+        // point cloud from camera space to world space.
+        pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
+    }
 
     // Concatenate the point clouds (i.e. add the new point cloud calculated from the new depth frame to the point cloud
     // calculated from the previous frames).
@@ -208,7 +247,7 @@ void PointCloudReceiver::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr c
 
     pointCloudMessage.header.seq = pointCloudSequenceNumber++;
     pointCloudMessage.header.stamp = ros::Time::now();
-    pointCloudMessage.header.frame_id = "hololens";
+    pointCloudMessage.header.frame_id = "hololens_world";
 
     pointCloudPublisher.publish(pointCloudMessage);
 }
@@ -219,13 +258,31 @@ void PointCloudReceiver::publishHololensPosition(const hololens_point_cloud_msgs
 
     hololensPosition.header.seq = pointCloudSequenceNumber;
     hololensPosition.header.stamp = ros::Time::now();
-    hololensPosition.header.frame_id = "hololens";
+    hololensPosition.header.frame_id = "hololens_world";
 
     hololensPosition.point.x = depthFrame->camToWorldTranslation.x;
     hololensPosition.point.y = depthFrame->camToWorldTranslation.y;
     hololensPosition.point.z = depthFrame->camToWorldTranslation.z;
 
     hololensPositionPublisher.publish(hololensPosition);
+}
+
+void PointCloudReceiver::publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
+{
+    tf::Transform transform;
+
+    transform.setOrigin(tf::Vector3(
+        depthFrame->camToWorldTranslation.x,
+        depthFrame->camToWorldTranslation.y,
+        depthFrame->camToWorldTranslation.z));
+
+    transform.setRotation(tf::Quaternion(
+        depthFrame->camToWorldRotation.x,
+        depthFrame->camToWorldRotation.y,
+        depthFrame->camToWorldRotation.z,
+        depthFrame->camToWorldRotation.w));
+    
+    hololensCamPublisher.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "hololens_world", "hololens_cam"));
 }
 
 void PointCloudReceiver::publishDepthImage(
@@ -238,7 +295,7 @@ void PointCloudReceiver::publishDepthImage(
 
     image.header.seq = (*sequenceNumber)++;
     image.header.stamp = ros::Time::now();
-    image.header.frame_id = "depth_camera";
+    image.header.frame_id = "hololens_camera";
 
     image.height = depthMap.height;
     image.width = depthMap.width;
@@ -259,6 +316,7 @@ void PointCloudReceiver::clearPointCloud()
 
     pointCloudMutex.lock();
     pointCloud->clear();
+    publishPointCloud(pointCloud);
     pointCloudMutex.unlock();
 }
 

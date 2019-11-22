@@ -23,6 +23,8 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
+#include <tf/transform_broadcaster.h>
+
 #define SHORT_THROW_MIN_RELIABLE_DEPTH 0.2f
 #define SHORT_THROW_MAX_RELIABLE_DEPTH 1.0f
 
@@ -90,6 +92,7 @@ private:
 
     void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
     void publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
+    void publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishDepthImage(
         const DepthMap depthMap, 
         const ros::Publisher& publisher, 
@@ -104,6 +107,8 @@ private:
     ros::Publisher longThrowImagePublisher;
     ros::Publisher pointCloudPublisher;
     ros::Publisher hololensPositionPublisher;
+
+    tf::TransformBroadcaster hololensCamPublisher;
 
     uint32_t shortThrowSequenceNumber;
     uint32_t longThrowSequenceNumber;

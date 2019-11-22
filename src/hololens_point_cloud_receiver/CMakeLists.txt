@@ -16,7 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   pcl_conversions
   pcl_ros
-  rqt_image_view
+  tf
 )
 
 ## System dependencies are found with CMake's conventions
