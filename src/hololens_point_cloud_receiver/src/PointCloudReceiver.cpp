@@ -129,7 +129,7 @@ Eigen::Matrix4f PointCloudReceiver::computeCamToWorldFromDepthFrame(
         depthFrame->camToWorldRotation.x, 
         depthFrame->camToWorldRotation.y, 
         depthFrame->camToWorldRotation.z
-    ).toRotationMatrix().transpose();
+    ).toRotationMatrix();
 
     // Set the translational part of the camera to world transformation matrix.
     camToWorld(0, 3) = depthFrame->camToWorldTranslation.x;
