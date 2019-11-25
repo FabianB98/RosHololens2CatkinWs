@@ -1,0 +1,5 @@
+<launch>
+  <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+  <include file="$(find hololens_point_cloud_control_gui)/launch/realtime_spatial_mapper_gui.launch"/>
+  <node name="depth_frame_recorder" pkg="hololens_point_cloud_receiver" type="depth_frame_recorder" output="screen"/>
+</launch>

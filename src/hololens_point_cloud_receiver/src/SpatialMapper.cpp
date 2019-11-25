@@ -1,15 +1,17 @@
-#include "PointCloudReceiver.h"
+#include "SpatialMapper.h"
 
 #include <pcl/common/transforms.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
 #include <pcl/registration/icp.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 
-PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
+SpatialMapper::SpatialMapper(ros::NodeHandle n)
 {
-    ROS_INFO("Creating PointCloudReceiver...");
+    ROS_INFO("Creating SpatialMapper...");
 
     // Initialize the point cloud.
     pointCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
@@ -21,33 +23,33 @@ PointCloudReceiver::PointCloudReceiver(ros::NodeHandle n)
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(HOLOLENS_POSITION_TOPIC, 10);
 }
 
-void PointCloudReceiver::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
+void SpatialMapper::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a short throw depth frame!");
     // handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
     //         shortThrowImagePublisher, &shortThrowSequenceNumber);
 }
 
-void PointCloudReceiver::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
+void SpatialMapper::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
     handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
             longThrowImagePublisher, &longThrowSequenceNumber);
 }
 
-void PointCloudReceiver::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
+void SpatialMapper::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
 {
     ROS_INFO("Received %zu short throw pixel directions!", msg->pixelDirections.size());
     shortThrowDirections = msg;
 }
 
-void PointCloudReceiver::handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
+void SpatialMapper::handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
 {
     ROS_INFO("Received %zu long throw pixel directions!", msg->pixelDirections.size());
     longThrowDirections = msg;
 }
 
-void PointCloudReceiver::handleDepthFrame(
+void SpatialMapper::handleDepthFrame(
     const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
     const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
     const float minReliableDepth,
@@ -91,7 +93,7 @@ void PointCloudReceiver::handleDepthFrame(
     publishPointCloud(combinedPointCloud);
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::computePointCloudFromDepthMap(
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::computePointCloudFromDepthMap(
     const DepthMap depthMap, 
     const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
     const float minReliableDepth,
@@ -120,7 +122,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::computePointCloudFromDep
     return pointCloudCamSpace;
 }
 
-Eigen::Matrix4f PointCloudReceiver::computeCamToWorldFromDepthFrame(
+Eigen::Matrix4f SpatialMapper::computeCamToWorldFromDepthFrame(
     const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
 {
     // Create the camera to world transformation matrix which will be returned later on.
@@ -143,7 +145,7 @@ Eigen::Matrix4f PointCloudReceiver::computeCamToWorldFromDepthFrame(
     return camToWorld;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::downsamplePointCloud(
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::downsamplePointCloud(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
     const float leafSize)
 {
@@ -160,7 +162,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::downsamplePointCloud(
     return pointCloudDownsampled;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::removeOutliers(
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliers(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
     const float numNeighborsToCheck,
     const float standardDeviationMultiplier)
@@ -179,7 +181,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::removeOutliers(
     return pointCloudFiltered;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::registerPointCloud(
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
     Eigen::Matrix4f camToWorld)
 {
@@ -197,8 +199,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::registerPointCloud(
         // Set the parameters for ICP.
         icp.setMaximumIterations(1);
         icp.setTransformationEpsilon(1e-12);
-        icp.setMaxCorrespondenceDistance(0.2);
-        icp.setRANSACOutlierRejectionThreshold(0.0001);
+        icp.setMaxCorrespondenceDistance(0.1);
+        icp.setRANSACOutlierRejectionThreshold(0.001);
         icp.setEuclideanFitnessEpsilon(1);
 
         // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
@@ -240,7 +242,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudReceiver::registerPointCloud(
     return downsampledPointCloud;
 }
 
-void PointCloudReceiver::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
     sensor_msgs::PointCloud2 pointCloudMessage;
     pcl::toROSMsg(*cloud, pointCloudMessage);
@@ -252,7 +254,7 @@ void PointCloudReceiver::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr c
     pointCloudPublisher.publish(pointCloudMessage);
 }
 
-void PointCloudReceiver::publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
+void SpatialMapper::publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
 {
     geometry_msgs::PointStamped hololensPosition;
 
@@ -267,7 +269,7 @@ void PointCloudReceiver::publishHololensPosition(const hololens_point_cloud_msgs
     hololensPositionPublisher.publish(hololensPosition);
 }
 
-void PointCloudReceiver::publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
+void SpatialMapper::publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
 {
     tf::Transform transform;
 
@@ -285,7 +287,7 @@ void PointCloudReceiver::publishHololensCamToWorldTf(const hololens_point_cloud_
     hololensCamPublisher.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "hololens_world", "hololens_cam"));
 }
 
-void PointCloudReceiver::publishDepthImage(
+void SpatialMapper::publishDepthImage(
     const DepthMap depthMap, 
     const ros::Publisher& publisher, 
     uint32_t* sequenceNumber,
@@ -310,7 +312,7 @@ void PointCloudReceiver::publishDepthImage(
     publisher.publish(image);
 }
 
-void PointCloudReceiver::clearPointCloud()
+void SpatialMapper::clearPointCloud()
 {
     ROS_INFO("Clearing point cloud...");
 
@@ -320,7 +322,16 @@ void PointCloudReceiver::clearPointCloud()
     pointCloudMutex.unlock();
 }
 
-void PointCloudReceiver::savePointCloud()
+void SpatialMapper::savePointCloud()
 {
     ROS_INFO("Saving point cloud...");
+
+    std::string home = std::string(getenv("HOME"));
+
+    pointCloudMutex.lock();
+    pcl::io::savePCDFileASCII(home + "/spatial_map.pcd", *pointCloud);
+    pcl::io::savePLYFileASCII(home + "/spatial_map.ply", *pointCloud);
+    pointCloudMutex.unlock();
+
+    ROS_INFO("Saved point cloud!");
 }

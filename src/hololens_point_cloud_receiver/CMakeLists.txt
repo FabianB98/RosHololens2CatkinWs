@@ -156,8 +156,11 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
-add_executable(listener src/Main.cpp src/PointCloudReceiver.cpp src/DepthMap.cpp src/Base64.cpp)
-target_link_libraries(listener ${catkin_LIBRARIES})
+add_executable(spatial_mapper src/MainSpatialMapper.cpp src/SpatialMapper.cpp src/DepthMap.cpp src/Base64.cpp)
+target_link_libraries(spatial_mapper ${catkin_LIBRARIES})
+
+add_executable(depth_frame_recorder src/MainRecorder.cpp src/DepthFrameRecorder.cpp)
+target_link_libraries(depth_frame_recorder ${catkin_LIBRARIES})
 #############
 ## Install ##
 #############

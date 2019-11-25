@@ -1,6 +1,7 @@
-#include "PointCloudReceiver.h"
+#include "SpatialMapper.h"
+#include "Topics.h"
 
-PointCloudReceiver* pointCloudReceiver;
+SpatialMapper* spatialMapper;
 
 int main(int argc, char **argv);
 
