@@ -1,9 +1,9 @@
-#include "MainSpatialMapper.h"
+#include "MainRealtimeSpatialMapper.h"
 
 int main(int argc, char **argv)
 {
     // Initialize everything.
-    ros::init(argc, argv, "spatial_mapper");
+    ros::init(argc, argv, "realtime_spatial_mapper");
 
     ros::NodeHandle n;
 

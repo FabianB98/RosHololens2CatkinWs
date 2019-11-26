@@ -327,10 +327,11 @@ void SpatialMapper::savePointCloud()
     ROS_INFO("Saving point cloud...");
 
     std::string home = std::string(getenv("HOME"));
+    std::string time = boost::lexical_cast<std::string>(ros::Time::now().toNSec());
 
     pointCloudMutex.lock();
-    pcl::io::savePCDFileASCII(home + "/spatial_map.pcd", *pointCloud);
-    pcl::io::savePLYFileASCII(home + "/spatial_map.ply", *pointCloud);
+    pcl::io::savePCDFileASCII(home + "/spatial_map_" + time + ".pcd", *pointCloud);
+    pcl::io::savePLYFileASCII(home + "/spatial_map_" + time + ".ply", *pointCloud);
     pointCloudMutex.unlock();
 
     ROS_INFO("Saved point cloud!");

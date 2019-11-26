@@ -13,4 +13,5 @@
 #define HOLOLENS_POSITION_TOPIC "/hololensPosition"
 #define POINT_CLOUD_TOPIC "/pointCloud"
 
-#define RECORD_TOPIC "/recordDepthFrame"
+#define RECORD_TOPIC "/recordDepthFrames"
+#define LOAD_RECORDING_TOPIC "/loadRecording"

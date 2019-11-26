@@ -11,7 +11,7 @@ int main(int argc, char **argv)
     ros::Subscriber longThrowDepthSubscriber = n.subscribe(LONG_THROW_DEPTH_TOPIC, 10, longThrowDepthFrameCallback);
     ros::Subscriber shortThrowDirectionsSubscriber = n.subscribe(SHORT_THROW_PIXEL_DIRECTIONS_TOPIC, 10, shortThrowPixelDirectionsCallback);
     ros::Subscriber longThrowDirectionsSubscriber = n.subscribe(LONG_THROW_PIXEL_DIRECTIONS_TOPIC, 10, longThrowPixelDirectionsCallback);
-    ros::Subscriber recordSubscriber = n.subscribe(CLEAR_POINT_CLOUD_TOPIC, 10, recordCallback);
+    ros::Subscriber recordSubscriber = n.subscribe(RECORD_TOPIC, 10, recordCallback);
 
     depthFrameRecorder = new DepthFrameRecorder();
 

@@ -156,11 +156,14 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
-add_executable(spatial_mapper src/MainSpatialMapper.cpp src/SpatialMapper.cpp src/DepthMap.cpp src/Base64.cpp)
-target_link_libraries(spatial_mapper ${catkin_LIBRARIES})
+add_executable(realtime_spatial_mapper src/MainRealtimeSpatialMapper.cpp src/SpatialMapper.cpp src/DepthMap.cpp src/Base64.cpp)
+target_link_libraries(realtime_spatial_mapper ${catkin_LIBRARIES})
 
 add_executable(depth_frame_recorder src/MainRecorder.cpp src/DepthFrameRecorder.cpp)
 target_link_libraries(depth_frame_recorder ${catkin_LIBRARIES})
+
+add_executable(recorded_spatial_mapper src/MainRecordedSpatialMapper.cpp src/DepthFrameReader.cpp src/SpatialMapper.cpp src/DepthMap.cpp src/Base64.cpp)
+target_link_libraries(recorded_spatial_mapper ${catkin_LIBRARIES})
 #############
 ## Install ##
 #############
