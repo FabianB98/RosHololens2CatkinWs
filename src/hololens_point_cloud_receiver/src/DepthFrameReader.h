@@ -23,7 +23,7 @@ public:
 
 private:
     hololens_point_cloud_msgs::PixelDirections::ConstPtr loadPixelDirections(std::string filename);
-    hololens_point_cloud_msgs::DepthFrame::ConstPtr loadDepthFrame(std::string filename);
+    hololens_point_cloud_msgs::DepthFrame::ConstPtr loadDepthFrame(const boost::filesystem::path& path, bool* isLongThrow);
 
 private:
     SpatialMapper* spatialMapper;
