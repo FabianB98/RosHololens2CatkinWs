@@ -1,5 +1,6 @@
 #include "SpatialMapper.h"
 
+#include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
@@ -173,8 +174,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliers(
     // Remove outliers by using a statistical outlier removal.
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statisticalOutlierRemoval;
     statisticalOutlierRemoval.setInputCloud(pointCloudToFilter);
-    statisticalOutlierRemoval.setMeanK(10);
-    statisticalOutlierRemoval.setStddevMulThresh(1.0);
+    statisticalOutlierRemoval.setMeanK(50);
+    statisticalOutlierRemoval.setStddevMulThresh(0.2);
     statisticalOutlierRemoval.filter(*pointCloudFiltered);
 
     // Return the point cloud with the outliers removed.
@@ -190,43 +191,47 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Transform the point cloud from camera space to world space.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    if (pointCloud->size() != 0) 
-    {
-        // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
-        // align the given point cloud to the global point cloud.
-        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    // if (pointCloud->size() != 0) 
+    // {
+    //     // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
+    //     // align the given point cloud to the global point cloud.
+    //     pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 
-        // Set the parameters for ICP.
-        icp.setMaximumIterations(1);
-        icp.setTransformationEpsilon(1e-12);
-        icp.setMaxCorrespondenceDistance(0.1);
-        icp.setRANSACOutlierRejectionThreshold(0.001);
-        icp.setEuclideanFitnessEpsilon(1);
+    //     // Set the parameters for ICP.
+    //     icp.setMaximumIterations(1);
+    //     icp.setTransformationEpsilon(1e-12);
+    //     icp.setMaxCorrespondenceDistance(0.1);
+    //     icp.setRANSACOutlierRejectionThreshold(0.001);
+    //     icp.setEuclideanFitnessEpsilon(1);
 
-        // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
-        icp.setInputSource(pointCloudCamSpace);
-        icp.setInputTarget(pointCloud);
+    //     // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
+    //     icp.setInputSource(pointCloudCamSpace);
+    //     icp.setInputTarget(pointCloud);
 
-        // Align the new point cloud using the camera to world transformation as an initial guess.
-        icp.align(*pointCloudWorldSpace, camToWorld);
+    //     // Align the new point cloud using the camera to world transformation as an initial guess.
+    //     icp.align(*pointCloudWorldSpace, camToWorld);
 
-        unsigned int iteration = 1;
-        while (!icp.hasConverged() && iteration < 20)
-        {
-            icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
-            iteration++;
-        }
+    //     unsigned int iteration = 1;
+    //     while (!icp.hasConverged() && iteration < 20)
+    //     {
+    //         icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
+    //         iteration++;
+    //     }
 
-        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
-        ROS_INFO("Num iterations: %u", iteration);
-        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
-    }
-    else 
-    {
+    //     ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+    //     ROS_INFO("Num iterations: %u", iteration);
+    //     ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+    // }
+    // else 
+    // {
         // There is no global point cloud yet, so we don't need to align the given point cloud. Simply transform the
         // point cloud from camera space to world space.
         pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
-    }
+    // }
+
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid(*pointCloudWorldSpace, centroid);
+    ROS_INFO("Centroid is located at (%f, %f, %f)", centroid(0), centroid(1), centroid(2));
 
     // Concatenate the point clouds (i.e. add the new point cloud calculated from the new depth frame to the point cloud
     // calculated from the previous frames).
