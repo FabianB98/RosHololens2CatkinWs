@@ -63,7 +63,7 @@ class ControlGuiPlugin(Plugin):
         # Update and show the UI elements.
         self._widget.record_button.setCheckable(True)
         self._widget.record_button.setStyleSheet('QPushButton:checked{background-color:red}\nQPushButton:focus{border-style:groove;border-width:1px;border-radius:1px;border-color:silver;}')
-        self._widget.recording_directory_input.setPlainText(expanduser("~/recording_"))
+        self._widget.recording_directory_input.setPlainText(expanduser("~/recordings/"))
         self.updateUi()
 
     def shutdown_plugin(self):

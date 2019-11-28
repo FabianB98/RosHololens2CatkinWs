@@ -72,7 +72,7 @@ void DepthFrameRecorder::startRecording()
 
     // Create the directory in which everything from this recording will be stored.
     std::string home = std::string(getenv("HOME"));
-    std::string directory = home + "/recording_" + boost::lexical_cast<std::string>(ros::Time::now().toNSec()) + "/";
+    std::string directory = home + "/recordings/" + boost::lexical_cast<std::string>(ros::Time::now().toNSec()) + "/";
     boost::filesystem::create_directories(directory);
 
     // Create the subdirectory for the pixel directions and store the short and long throw pixel directions.

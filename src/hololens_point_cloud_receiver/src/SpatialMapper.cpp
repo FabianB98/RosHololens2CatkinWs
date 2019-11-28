@@ -191,44 +191,45 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Transform the point cloud from camera space to world space.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    // if (pointCloud->size() != 0) 
-    // {
-    //     // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
-    //     // align the given point cloud to the global point cloud.
-    //     pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    if (pointCloud->size() != 0) 
+    {
+        // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
+        // align the given point cloud to the global point cloud.
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 
-    //     // Set the parameters for ICP.
-    //     icp.setMaximumIterations(1);
-    //     icp.setTransformationEpsilon(1e-12);
-    //     icp.setMaxCorrespondenceDistance(0.1);
-    //     icp.setRANSACOutlierRejectionThreshold(0.001);
-    //     icp.setEuclideanFitnessEpsilon(1);
+        // Set the parameters for ICP.
+        icp.setMaximumIterations(1);
+        icp.setTransformationEpsilon(1e-12);
+        icp.setMaxCorrespondenceDistance(0.1);
+        icp.setRANSACOutlierRejectionThreshold(0.001);
+        icp.setEuclideanFitnessEpsilon(1);
 
-    //     // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
-    //     icp.setInputSource(pointCloudCamSpace);
-    //     icp.setInputTarget(pointCloud);
+        // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
+        icp.setInputSource(pointCloudCamSpace);
+        icp.setInputTarget(pointCloud);
 
-    //     // Align the new point cloud using the camera to world transformation as an initial guess.
-    //     icp.align(*pointCloudWorldSpace, camToWorld);
+        // Align the new point cloud using the camera to world transformation as an initial guess.
+        icp.align(*pointCloudWorldSpace, camToWorld);
 
-    //     unsigned int iteration = 1;
-    //     while (!icp.hasConverged() && iteration < 20)
-    //     {
-    //         icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
-    //         iteration++;
-    //     }
+        unsigned int iteration = 1;
+        while (!icp.hasConverged() && iteration < 20)
+        {
+            icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
+            iteration++;
+        }
 
-    //     ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
-    //     ROS_INFO("Num iterations: %u", iteration);
-    //     ROS_INFO("Fitness score: %f", icp.getFitnessScore());
-    // }
-    // else 
-    // {
+        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+        ROS_INFO("Num iterations: %u", iteration);
+        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+    }
+    else 
+    {
         // There is no global point cloud yet, so we don't need to align the given point cloud. Simply transform the
         // point cloud from camera space to world space.
         pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
-    // }
+    }
 
+    // Calculate the centroid of the point cloud from the new frame.
     Eigen::Vector4f centroid;
     pcl::compute3DCentroid(*pointCloudWorldSpace, centroid);
     ROS_INFO("Centroid is located at (%f, %f, %f)", centroid(0), centroid(1), centroid(2));
@@ -244,51 +245,63 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     // Unlock the point cloud mutex as we're done with the registration of the new point cloud.
     pointCloudMutex.unlock();
 
+    // Return the downsampled concatenated point cloud.
     return downsampledPointCloud;
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
+    // Create the ROS message for the point cloud and store the point cloud inside it.
     sensor_msgs::PointCloud2 pointCloudMessage;
     pcl::toROSMsg(*cloud, pointCloudMessage);
 
+    // Set the header of the message.
     pointCloudMessage.header.seq = pointCloudSequenceNumber++;
     pointCloudMessage.header.stamp = ros::Time::now();
     pointCloudMessage.header.frame_id = "hololens_world";
 
+    // Publish the message.
     pointCloudPublisher.publish(pointCloudMessage);
 }
 
 void SpatialMapper::publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
 {
+    // Create the ROS message for the current position of the HoloLens.
     geometry_msgs::PointStamped hololensPosition;
 
+    // Set the header of the message.
     hololensPosition.header.seq = pointCloudSequenceNumber;
     hololensPosition.header.stamp = ros::Time::now();
     hololensPosition.header.frame_id = "hololens_world";
 
+    // Add the position of the HoloLens to the message.
     hololensPosition.point.x = depthFrame->camToWorldTranslation.x;
     hololensPosition.point.y = depthFrame->camToWorldTranslation.y;
     hololensPosition.point.z = depthFrame->camToWorldTranslation.z;
 
+    // Publish the message.
     hololensPositionPublisher.publish(hololensPosition);
 }
 
 void SpatialMapper::publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
 {
+    // Create the transform instance which will be published.
     tf::Transform transform;
 
+    // Set the translational part of the transform.
     transform.setOrigin(tf::Vector3(
         depthFrame->camToWorldTranslation.x,
         depthFrame->camToWorldTranslation.y,
         depthFrame->camToWorldTranslation.z));
 
+    // Set the rotational part of the transform.
     transform.setRotation(tf::Quaternion(
         depthFrame->camToWorldRotation.x,
         depthFrame->camToWorldRotation.y,
         depthFrame->camToWorldRotation.z,
         depthFrame->camToWorldRotation.w));
     
+    // Publish the transform.
     hololensCamPublisher.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "hololens_world", "hololens_cam"));
 }
 
@@ -298,22 +311,27 @@ void SpatialMapper::publishDepthImage(
     uint32_t* sequenceNumber,
     const float maxReliableDepth)
 {
+    // Create the ROS message for the image.
     sensor_msgs::Image image;
 
+    // Set the header of the image.
     image.header.seq = (*sequenceNumber)++;
     image.header.stamp = ros::Time::now();
-    image.header.frame_id = "hololens_camera";
+    image.header.frame_id = "hololens_cam";
 
+    // Set the meta data (width, height, encoding, ...) of the image.
     image.height = depthMap.height;
     image.width = depthMap.width;
     image.encoding = sensor_msgs::image_encodings::MONO8;
     image.is_bigendian = 0;
     image.step = depthMap.width;
 
+    // Brighten the image and add it to the message.
     for (uint32_t v = 0; v < image.height; ++v)
         for (uint32_t u = 0; u < image.width; ++u)
             image.data.push_back(static_cast<uint8_t>(255.0f * depthMap.valueAt(u, v) / (maxReliableDepth * 1000.0f)));
     
+    // Publish the message.
     publisher.publish(image);
 }
 
@@ -321,6 +339,7 @@ void SpatialMapper::clearPointCloud()
 {
     ROS_INFO("Clearing point cloud...");
 
+    // Remove all points from the point cloud and publish the cleared point cloud.
     pointCloudMutex.lock();
     pointCloud->clear();
     publishPointCloud(pointCloud);
@@ -331,12 +350,15 @@ void SpatialMapper::savePointCloud()
 {
     ROS_INFO("Saving point cloud...");
 
+    // Create the prefix (file path and file name) of the file.
     std::string home = std::string(getenv("HOME"));
     std::string time = boost::lexical_cast<std::string>(ros::Time::now().toNSec());
+    std::string prefix = home + "/spatial_maps/" + time;
 
+    // Save the point cloud in both PCD and PLY file format.
     pointCloudMutex.lock();
-    pcl::io::savePCDFileASCII(home + "/spatial_map_" + time + ".pcd", *pointCloud);
-    pcl::io::savePLYFileASCII(home + "/spatial_map_" + time + ".ply", *pointCloud);
+    pcl::io::savePCDFileASCII(prefix + ".pcd", *pointCloud);
+    pcl::io::savePLYFileASCII(prefix + ".ply", *pointCloud);
     pointCloudMutex.unlock();
 
     ROS_INFO("Saved point cloud!");
