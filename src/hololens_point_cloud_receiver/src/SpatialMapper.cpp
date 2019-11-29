@@ -10,6 +10,10 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
+#define DOWNSAMPLING_LEAF_SIZE 0.01f
+#define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 50
+#define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.2
+
 SpatialMapper::SpatialMapper(ros::NodeHandle n)
 {
     ROS_INFO("Creating SpatialMapper...");
@@ -76,8 +80,9 @@ void SpatialMapper::handleDepthFrame(
         return;
 
     // Downsample the point cloud and remove outliers.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceDownsampled = downsamplePointCloud(pointCloudCamSpace, 0.01f);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceFiltered = removeOutliers(pointCloudCamSpaceDownsampled, 10, 1.0);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceDownsampled = downsamplePointCloud(pointCloudCamSpace, DOWNSAMPLING_LEAF_SIZE);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceFiltered = removeOutliers(pointCloudCamSpaceDownsampled, 
+            OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK, OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER);
 
     // Assert that there is at least one point in the filtered point cloud.
     if (pointCloudCamSpaceFiltered->size() == 0)
@@ -174,8 +179,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliers(
     // Remove outliers by using a statistical outlier removal.
     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> statisticalOutlierRemoval;
     statisticalOutlierRemoval.setInputCloud(pointCloudToFilter);
-    statisticalOutlierRemoval.setMeanK(50);
-    statisticalOutlierRemoval.setStddevMulThresh(0.2);
+    statisticalOutlierRemoval.setMeanK(numNeighborsToCheck);
+    statisticalOutlierRemoval.setStddevMulThresh(standardDeviationMultiplier);
     statisticalOutlierRemoval.filter(*pointCloudFiltered);
 
     // Return the point cloud with the outliers removed.
@@ -191,43 +196,43 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Transform the point cloud from camera space to world space.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    if (pointCloud->size() != 0) 
-    {
-        // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
-        // align the given point cloud to the global point cloud.
-        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    // if (pointCloud->size() != 0) 
+    // {
+    //     // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
+    //     // align the given point cloud to the global point cloud.
+    //     pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 
-        // Set the parameters for ICP.
-        icp.setMaximumIterations(1);
-        icp.setTransformationEpsilon(1e-12);
-        icp.setMaxCorrespondenceDistance(0.1);
-        icp.setRANSACOutlierRejectionThreshold(0.001);
-        icp.setEuclideanFitnessEpsilon(1);
+    //     // Set the parameters for ICP.
+    //     icp.setMaximumIterations(1);
+    //     icp.setTransformationEpsilon(1e-12);
+    //     icp.setMaxCorrespondenceDistance(0.1);
+    //     icp.setRANSACOutlierRejectionThreshold(0.001);
+    //     icp.setEuclideanFitnessEpsilon(1);
 
-        // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
-        icp.setInputSource(pointCloudCamSpace);
-        icp.setInputTarget(pointCloud);
+    //     // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
+    //     icp.setInputSource(pointCloudCamSpace);
+    //     icp.setInputTarget(pointCloud);
 
-        // Align the new point cloud using the camera to world transformation as an initial guess.
-        icp.align(*pointCloudWorldSpace, camToWorld);
+    //     // Align the new point cloud using the camera to world transformation as an initial guess.
+    //     icp.align(*pointCloudWorldSpace, camToWorld);
 
-        unsigned int iteration = 1;
-        while (!icp.hasConverged() && iteration < 20)
-        {
-            icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
-            iteration++;
-        }
+    //     unsigned int iteration = 1;
+    //     while (!icp.hasConverged() && iteration < 20)
+    //     {
+    //         icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
+    //         iteration++;
+    //     }
 
-        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
-        ROS_INFO("Num iterations: %u", iteration);
-        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
-    }
-    else 
-    {
+    //     ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+    //     ROS_INFO("Num iterations: %u", iteration);
+    //     ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+    // }
+    // else 
+    // {
         // There is no global point cloud yet, so we don't need to align the given point cloud. Simply transform the
         // point cloud from camera space to world space.
         pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
-    }
+    // }
 
     // Calculate the centroid of the point cloud from the new frame.
     Eigen::Vector4f centroid;
@@ -239,7 +244,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     *pointCloud += *pointCloudWorldSpace;
 
     // Downsample the concatenated point cloud to avoid a point density which is higher than what is needed.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr downsampledPointCloud = downsamplePointCloud(pointCloud, 0.01f);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr downsampledPointCloud = downsamplePointCloud(pointCloud, DOWNSAMPLING_LEAF_SIZE);
     pointCloud = downsampledPointCloud;
 
     // Unlock the point cloud mutex as we're done with the registration of the new point cloud.
@@ -352,8 +357,12 @@ void SpatialMapper::savePointCloud()
 
     // Create the prefix (file path and file name) of the file.
     std::string home = std::string(getenv("HOME"));
+    std::string directory = home + "/spatial_maps/";
     std::string time = boost::lexical_cast<std::string>(ros::Time::now().toNSec());
-    std::string prefix = home + "/spatial_maps/" + time;
+    std::string prefix = directory + time;
+
+    // Create the directory (if not already done) in which the point cloud will be saved.
+    boost::filesystem::create_directories(directory);
 
     // Save the point cloud in both PCD and PLY file format.
     pointCloudMutex.lock();

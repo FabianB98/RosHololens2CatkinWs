@@ -70,6 +70,8 @@ class ControlGuiPlugin(Plugin):
         # TODO unregister all publishers here
         self.clearPublisher.unregister()
         self.savePublisher.unregister()
+        self.recordPublisher.unregister()
+        self.loadPublisher.unregister()
         pass
 
     def save_settings(self, plugin_settings, instance_settings):
