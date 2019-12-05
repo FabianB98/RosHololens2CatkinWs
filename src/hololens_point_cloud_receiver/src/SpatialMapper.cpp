@@ -10,9 +10,17 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
+// Booleans which define whether short and/or long throw depth frames should be used for calculating the point cloud.
+#define USE_SHORT_THROW false
+#define USE_LONG_THROW true
+
+// Parameters for downsampling and outlier removal.
 #define DOWNSAMPLING_LEAF_SIZE 0.01f
 #define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 50
 #define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.2
+
+// A boolean indicating whether ICP should be used for registering the new point cloud to the global cloud.
+#define USE_ICP false
 
 SpatialMapper::SpatialMapper(ros::NodeHandle n)
 {
@@ -31,15 +39,17 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
 void SpatialMapper::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a short throw depth frame!");
-    // handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
-    //         shortThrowImagePublisher, &shortThrowSequenceNumber);
+    if (USE_SHORT_THROW)
+        handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
+                shortThrowImagePublisher, &shortThrowSequenceNumber);
 }
 
 void SpatialMapper::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
-    handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
-            longThrowImagePublisher, &longThrowSequenceNumber);
+    if (USE_LONG_THROW)
+        handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
+                longThrowImagePublisher, &longThrowSequenceNumber);
 }
 
 void SpatialMapper::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
@@ -196,43 +206,43 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Transform the point cloud from camera space to world space.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    // if (pointCloud->size() != 0) 
-    // {
-    //     // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
-    //     // align the given point cloud to the global point cloud.
-    //     pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    if (pointCloud->size() != 0 && USE_ICP) 
+    {
+        // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
+        // align the given point cloud to the global point cloud.
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 
-    //     // Set the parameters for ICP.
-    //     icp.setMaximumIterations(1);
-    //     icp.setTransformationEpsilon(1e-12);
-    //     icp.setMaxCorrespondenceDistance(0.1);
-    //     icp.setRANSACOutlierRejectionThreshold(0.001);
-    //     icp.setEuclideanFitnessEpsilon(1);
+        // Set the parameters for ICP.
+        icp.setMaximumIterations(1);
+        icp.setTransformationEpsilon(1e-12);
+        icp.setMaxCorrespondenceDistance(0.1);
+        icp.setRANSACOutlierRejectionThreshold(0.001);
+        icp.setEuclideanFitnessEpsilon(1);
 
-    //     // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
-    //     icp.setInputSource(pointCloudCamSpace);
-    //     icp.setInputTarget(pointCloud);
+        // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
+        icp.setInputSource(pointCloudCamSpace);
+        icp.setInputTarget(pointCloud);
 
-    //     // Align the new point cloud using the camera to world transformation as an initial guess.
-    //     icp.align(*pointCloudWorldSpace, camToWorld);
+        // Align the new point cloud using the camera to world transformation as an initial guess.
+        icp.align(*pointCloudWorldSpace, camToWorld);
 
-    //     unsigned int iteration = 1;
-    //     while (!icp.hasConverged() && iteration < 20)
-    //     {
-    //         icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
-    //         iteration++;
-    //     }
+        unsigned int iteration = 1;
+        while (!icp.hasConverged() && iteration < 20)
+        {
+            icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
+            iteration++;
+        }
 
-    //     ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
-    //     ROS_INFO("Num iterations: %u", iteration);
-    //     ROS_INFO("Fitness score: %f", icp.getFitnessScore());
-    // }
-    // else 
-    // {
+        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+        ROS_INFO("Num iterations: %u", iteration);
+        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+    }
+    else 
+    {
         // There is no global point cloud yet, so we don't need to align the given point cloud. Simply transform the
         // point cloud from camera space to world space.
         pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
-    // }
+    }
 
     // Calculate the centroid of the point cloud from the new frame.
     Eigen::Vector4f centroid;
