@@ -28,12 +28,6 @@
 
 #include <tf/transform_broadcaster.h>
 
-#define SHORT_THROW_MIN_RELIABLE_DEPTH 0.2f
-#define SHORT_THROW_MAX_RELIABLE_DEPTH 1.0f
-
-#define LONG_THROW_MIN_RELIABLE_DEPTH 0.5f
-#define LONG_THROW_MAX_RELIABLE_DEPTH 4.0f
-
 class SpatialMapper
 {
 public:
@@ -51,8 +45,10 @@ private:
     void handleDepthFrame(
         const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
         const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
+        const float minDepth,
         const float minReliableDepth,
         const float maxReliableDepth,
+        const float maxDepth,
         const ros::Publisher& imagePublisher,
         uint32_t* sequenceNumber);
 
@@ -85,7 +81,10 @@ private:
         const DepthMap depthMap, 
         const ros::Publisher& publisher, 
         uint32_t* sequenceNumber,
-        const float maxReliableDepth);
+        const float minDepth,
+        const float minReliableDepth,
+        const float maxReliableDepth,
+        const float maxDepth);
 
 private:
     hololens_point_cloud_msgs::PixelDirections::ConstPtr shortThrowDirections;

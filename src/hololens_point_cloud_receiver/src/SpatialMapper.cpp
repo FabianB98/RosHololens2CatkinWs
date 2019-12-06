@@ -10,17 +10,72 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
-// Booleans which define whether short and/or long throw depth frames should be used for calculating the point cloud.
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+//                                                                                                                    //
+//                             SWITCHES FOR CHANGING THE BEHAVIOUR OF THE SPATIAL MAPPER                              //
+//                                                                                                                    //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
+// Should short throw depth frames be used for calculating the point cloud?
 #define USE_SHORT_THROW false
+// Should long throw depth frames be used for calculating the point cloud?
 #define USE_LONG_THROW true
 
-// Parameters for downsampling and outlier removal.
-#define DOWNSAMPLING_LEAF_SIZE 0.01f
-#define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 50
-#define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.2
+// Switches indicating which filter algorithms should be executed.
+// Should new point clouds (i.e. non-registered point clouds calculated from the depth frames) be downsampled?
+#define DOWNSAMPLE_NEW_CLOUD true
+// Should outliers be removed from new point clouds?
+#define REMOVE_OUTLIERS true
+// Should the global point cloud be downsampled after the new point cloud was registered to it?
+#define DOWNSAMPLE_GLOBAL_CLOUD true
 
-// A boolean indicating whether ICP should be used for registering the new point cloud to the global cloud.
+// Switches regarding the registration of new point clouds to the global point cloud.
+// Should ICP be used for registering the new point cloud to the global point cloud?
 #define USE_ICP false
+
+// Switches regarding debugging information.
+// Should the centroid of new point clouds be calculated and printed to the console?
+#define PRINT_CENTROID false
+// Should the results of ICP (i.e. convergence, number of iterations and fitness score) be printed to the console?
+#define PRINT_ICP_RESULTS true
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+//                                                                                                                    //
+//                                      HYPER-PARAMETERS FOR THE USED ALGORITHMS                                      //
+//                                                                                                                    //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Parameters for the voxel grid filter used for downsampling.
+#define DOWNSAMPLING_LEAF_SIZE 0.01f
+
+// Parameters for the statistical outlier removal filter used for removing outliers.
+#define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 10
+#define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.5
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+//                                                                                                                    //
+//                               DEPTH RANGES (TOTAL AND RELIABLE) OF THE DEPTH SENSORS                               //
+//                                                                                                                    //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// The depth sensor intrinsics of the short throw depth sensor.
+#define SHORT_THROW_MIN_DEPTH 0.2f          // The minimum depth value which the sensor can report.
+#define SHORT_THROW_MIN_RELIABLE_DEPTH 0.2f // The minimum depth value to use. Smaller depth values will be discarded.
+#define SHORT_THROW_MAX_RELIABLE_DEPTH 1.0f // The maximum depth value to use. Greater depth values will be discarded.
+#define SHORT_THROW_MAX_DEPTH 1.0f          // The maximum depth value which the sensor can report.
+
+// The depth sensor intrinsics of the long throw depth sensor.
+#define LONG_THROW_MIN_DEPTH 0.5f           // The minimum depth value which the sensor can report.
+#define LONG_THROW_MIN_RELIABLE_DEPTH 0.85f // The minimum depth value to use. Smaller depth values will be discarded.
+#define LONG_THROW_MAX_RELIABLE_DEPTH 3.01f // The maximum depth value to use. Greater depth values will be discarded.
+#define LONG_THROW_MAX_DEPTH 4.0f           // The maximum depth value which the sensor can report.
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+//                                                                                                                    //
+//                                              ACTUAL CODE STARTS HERE                                               //
+//                                                                                                                    //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
 SpatialMapper::SpatialMapper(ros::NodeHandle n)
 {
@@ -40,16 +95,18 @@ void SpatialMapper::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::
 {
     ROS_INFO("Received a short throw depth frame!");
     if (USE_SHORT_THROW)
-        handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_RELIABLE_DEPTH, SHORT_THROW_MAX_RELIABLE_DEPTH,
-                shortThrowImagePublisher, &shortThrowSequenceNumber);
+        handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_DEPTH, SHORT_THROW_MIN_RELIABLE_DEPTH,
+                SHORT_THROW_MAX_RELIABLE_DEPTH, SHORT_THROW_MAX_DEPTH, shortThrowImagePublisher, 
+                &shortThrowSequenceNumber);
 }
 
 void SpatialMapper::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
     if (USE_LONG_THROW)
-        handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_RELIABLE_DEPTH, LONG_THROW_MAX_RELIABLE_DEPTH,
-                longThrowImagePublisher, &longThrowSequenceNumber);
+        handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_DEPTH, LONG_THROW_MIN_RELIABLE_DEPTH, 
+                LONG_THROW_MAX_RELIABLE_DEPTH, LONG_THROW_MAX_DEPTH, longThrowImagePublisher, 
+                &longThrowSequenceNumber);
 }
 
 void SpatialMapper::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
@@ -67,40 +124,45 @@ void SpatialMapper::handleLongThrowPixelDirections(const hololens_point_cloud_ms
 void SpatialMapper::handleDepthFrame(
     const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
     const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
+    const float minDepth,
     const float minReliableDepth,
     const float maxReliableDepth,
+    const float maxDepth,
     const ros::Publisher& imagePublisher,
     uint32_t* sequenceNumber)
 {
     // Decode the depth map.
     std::string decoded = base64_decode(depthFrame->base64encodedDepthMap);
-    DepthMap depthMap = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight, depthFrame->depthMapPixelStride, false);
+    DepthMap depthMap = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight, 
+            depthFrame->depthMapPixelStride, false);
 
     // Publish the depth map as well as the current position of the HoloLens.
     publishHololensPosition(depthFrame);
     publishHololensCamToWorldTf(depthFrame);
-    publishDepthImage(depthMap, imagePublisher, sequenceNumber, maxReliableDepth);
+    publishDepthImage(depthMap, imagePublisher, sequenceNumber, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
 
     // Calculate the point cloud (in camera space).
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = 
-        computePointCloudFromDepthMap(depthMap, pixelDirections, minReliableDepth, maxReliableDepth);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = computePointCloudFromDepthMap(depthMap, pixelDirections,
+            minReliableDepth, maxReliableDepth);
     
     // Assert that there is at least one point in the calculated point cloud.
     if (pointCloudCamSpace->size() == 0)
         return;
 
     // Downsample the point cloud and remove outliers.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceDownsampled = downsamplePointCloud(pointCloudCamSpace, DOWNSAMPLING_LEAF_SIZE);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceFiltered = removeOutliers(pointCloudCamSpaceDownsampled, 
-            OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK, OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER);
+    if (DOWNSAMPLE_NEW_CLOUD)
+        pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, DOWNSAMPLING_LEAF_SIZE);
+    if (REMOVE_OUTLIERS)
+        pointCloudCamSpace = removeOutliers(pointCloudCamSpace, OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK, 
+                OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER);
 
     // Assert that there is at least one point in the filtered point cloud.
-    if (pointCloudCamSpaceFiltered->size() == 0)
+    if (pointCloudCamSpace->size() == 0)
         return;
 
     // Calculate the transformation from camera space to world space and register the point cloud.
     Eigen::Matrix4f camToWorld = computeCamToWorldFromDepthFrame(depthFrame);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr combinedPointCloud = registerPointCloud(pointCloudCamSpaceFiltered, camToWorld);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr combinedPointCloud = registerPointCloud(pointCloudCamSpace, camToWorld);
 
     // TODO: Remove the following line of code later on...
     ROS_INFO("Total point cloud consists of %zu points.", combinedPointCloud->size());
@@ -131,7 +193,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::computePointCloudFromDepthMap
             continue;
 
         // Calculate the point for the current pixel based on the pixels depth value.
-        pointCloudCamSpace->push_back(pcl::PointXYZ(-dir.direction.x * depth, -dir.direction.y * depth, -dir.direction.z * depth));
+        pointCloudCamSpace->push_back(
+                pcl::PointXYZ(-dir.direction.x * depth, -dir.direction.y * depth, -dir.direction.z * depth));
     }
 
     // Return the calculated point cloud.
@@ -233,9 +296,13 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
             iteration++;
         }
 
-        ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
-        ROS_INFO("Num iterations: %u", iteration);
-        ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+        // Print information about the results of ICP.
+        if (PRINT_ICP_RESULTS)
+        {
+            ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
+            ROS_INFO("Num iterations: %u", iteration);
+            ROS_INFO("Fitness score: %f", icp.getFitnessScore());
+        }
     }
     else 
     {
@@ -245,23 +312,30 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     }
 
     // Calculate the centroid of the point cloud from the new frame.
-    Eigen::Vector4f centroid;
-    pcl::compute3DCentroid(*pointCloudWorldSpace, centroid);
-    ROS_INFO("Centroid is located at (%f, %f, %f)", centroid(0), centroid(1), centroid(2));
+    if (PRINT_CENTROID)
+    {
+        Eigen::Vector4f centroid;
+        pcl::compute3DCentroid(*pointCloudWorldSpace, centroid);
+        ROS_INFO("Centroid is located at (%f, %f, %f)", centroid(0), centroid(1), centroid(2));
+    }
 
     // Concatenate the point clouds (i.e. add the new point cloud calculated from the new depth frame to the point cloud
     // calculated from the previous frames).
     *pointCloud += *pointCloudWorldSpace;
 
     // Downsample the concatenated point cloud to avoid a point density which is higher than what is needed.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr downsampledPointCloud = downsamplePointCloud(pointCloud, DOWNSAMPLING_LEAF_SIZE);
-    pointCloud = downsampledPointCloud;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
+    if (DOWNSAMPLE_GLOBAL_CLOUD) 
+    {
+        cloud = downsamplePointCloud(pointCloud, DOWNSAMPLING_LEAF_SIZE);
+        pointCloud = cloud;
+    }
 
     // Unlock the point cloud mutex as we're done with the registration of the new point cloud.
     pointCloudMutex.unlock();
 
     // Return the downsampled concatenated point cloud.
-    return downsampledPointCloud;
+    return cloud;
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
@@ -324,7 +398,10 @@ void SpatialMapper::publishDepthImage(
     const DepthMap depthMap, 
     const ros::Publisher& publisher, 
     uint32_t* sequenceNumber,
-    const float maxReliableDepth)
+    const float minDepth,
+    const float minReliableDepth,
+    const float maxReliableDepth,
+    const float maxDepth)
 {
     // Create the ROS message for the image.
     sensor_msgs::Image image;
@@ -337,14 +414,53 @@ void SpatialMapper::publishDepthImage(
     // Set the meta data (width, height, encoding, ...) of the image.
     image.height = depthMap.height;
     image.width = depthMap.width;
-    image.encoding = sensor_msgs::image_encodings::MONO8;
+    image.encoding = sensor_msgs::image_encodings::RGB8;
     image.is_bigendian = 0;
-    image.step = depthMap.width;
+    image.step = depthMap.width * 3;
 
-    // Brighten the image and add it to the message.
+    // Brighten the image, color all unreliable pixels and add the image it to the message.
     for (uint32_t v = 0; v < image.height; ++v)
+    {
         for (uint32_t u = 0; u < image.width; ++u)
-            image.data.push_back(static_cast<uint8_t>(255.0f * depthMap.valueAt(u, v) / (maxReliableDepth * 1000.0f)));
+        {
+            // Get the depth of the current pixel.
+            uint32_t pixelValue = depthMap.valueAt(u, v);
+            float depth = static_cast<float>(pixelValue) / 1000.0f;
+
+            // Calculate the greyscale value which will be used for the pixel.
+            uint8_t greyscaleValue = static_cast<uint8_t>(255.0f * depth / maxDepth);
+
+            // Check if the depth is within a the (reliable) depth range.
+            if (depth < minDepth || depth > maxDepth)
+            {
+                // Depth is outside the depth range. Color the current pixel black.
+                image.data.push_back(0);
+                image.data.push_back(0);
+                image.data.push_back(0);
+            }
+            else if (depth < minReliableDepth)
+            {
+                // Depth too small to be considered as reliable. Color the current pixel purple.
+                image.data.push_back(greyscaleValue * 3);
+                image.data.push_back(0);
+                image.data.push_back(greyscaleValue * 3);
+            }
+            else if (depth > maxReliableDepth)
+            {
+                // Depth is too high to be considered as reliable. Color the current pixel red.
+                image.data.push_back(greyscaleValue);
+                image.data.push_back(0);
+                image.data.push_back(0);
+            }
+            else
+            {
+                // Depth is inside the reliable depth range. Color the current pixel grey.
+                image.data.push_back(greyscaleValue);
+                image.data.push_back(greyscaleValue);
+                image.data.push_back(greyscaleValue);
+            }
+        }
+    }
     
     // Publish the message.
     publisher.publish(image);
