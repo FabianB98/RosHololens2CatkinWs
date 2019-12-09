@@ -3,6 +3,8 @@
 
 DepthFrameReader* depthFrameReader;
 SpatialMapper* spatialMapper;
+SpatialMapper* spatialMapperNear;
+SpatialMapper* spatialMapperFar;
 
 int main(int argc, char **argv);
 

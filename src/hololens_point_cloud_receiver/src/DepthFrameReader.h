@@ -1,6 +1,7 @@
 #include <iostream>
-#include <string>
 #include <sstream>
+#include <stdlib.h>
+#include <string>
 
 #include "SpatialMapper.h"
 
@@ -17,7 +18,7 @@
 class DepthFrameReader
 {
 public:
-    DepthFrameReader(SpatialMapper* mapper);
+    DepthFrameReader(SpatialMapper* mappers[], int size);
 
     void processRecording(const std_msgs::String::ConstPtr& msg);
 
@@ -26,5 +27,6 @@ private:
     hololens_point_cloud_msgs::DepthFrame::ConstPtr loadDepthFrame(const boost::filesystem::path& path, bool* isLongThrow);
 
 private:
-    SpatialMapper* spatialMapper;
+    SpatialMapper** spatialMappers;
+    int numMappers;
 };

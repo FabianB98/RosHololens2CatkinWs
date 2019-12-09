@@ -31,17 +31,26 @@
 class SpatialMapper
 {
 public:
-    SpatialMapper(ros::NodeHandle n);
+    // Constructors.
+    SpatialMapper(
+        ros::NodeHandle n, 
+        const std::string shortThrowImageTopic = SHORT_THROW_IMAGE_TOPIC, 
+        const std::string longThrowImageTopic = LONG_THROW_IMAGE_TOPIC,
+        const std::string pointCloudTopic = POINT_CLOUD_TOPIC,
+        const std::string hololensPositionTopic = HOLOLENS_POSITION_TOPIC);
 
+    // Callbacks for handling the incoming depth frames and pixel directions.
     void handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg);
     void handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg);
     void handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
     void handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 
+    // Callbacks for clearing and saving the point cloud.
     void clearPointCloud();
     void savePointCloud();
 
 private:
+    // Handles the arrival of a new depth frame.
     void handleDepthFrame(
         const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame, 
         const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
@@ -52,28 +61,40 @@ private:
         const ros::Publisher& imagePublisher,
         uint32_t* sequenceNumber);
 
+    // Computes a point cloud (in camera space) from a given depth map.
     pcl::PointCloud<pcl::PointXYZ>::Ptr computePointCloudFromDepthMap(
         const DepthMap depthMap, 
         const hololens_point_cloud_msgs::PixelDirections::ConstPtr& pixelDirections,
         const float minReliableDepth,
         const float maxReliableDepth);
 
+    // Computes the transformation matrix for transforming from camera space to world space.
     Eigen::Matrix4f computeCamToWorldFromDepthFrame(
         const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
 
+    // Downsamples a given point cloud.
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsamplePointCloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
         const float leafSize);
     
-    pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliers(
+    // Removes outliers from a given point cloud with a radius outlier removal filter.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliersRadius(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+        const float radiusSearch,
+        const int minNeighborsInRadius);
+
+    // Removes outliers from a given point cloud with a statistical outlier removal filter.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliersStatistical(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
         const float numNeighborsToCheck,
         const float standardDeviationMultiplier);
 
+    // Registers a given point cloud to the global point cloud.
     pcl::PointCloud<pcl::PointXYZ>::Ptr registerPointCloud(
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
         Eigen::Matrix4f camToWorld);
 
+    // Methods for publishing the results.
     void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
     void publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
@@ -86,22 +107,80 @@ private:
         const float maxReliableDepth,
         const float maxDepth);
 
+// Note: From a software engineering perspective, it would be better to have getters and setters for all of the 
+// following public variables. However, I didn't find the time to do this yet.
+// TODO: Change all the following variables to be private and add getters and setters for them.
+public:
+    // Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
+    bool useShortThrow;
+    bool useLongThrow;
+
+    // Switches indicating which filter algorithms should be executed.
+    bool downsampleNewCloud;
+    bool removeOutliersRadiusNewCloud;
+    bool removeOutliersStatisticalNewCloud;
+    bool downsampleGlobalCloud;
+
+    // Switches regarding the registration of new point clouds to the global point cloud.
+    bool useICP;
+
+    // Switches indicating which results should be published.
+    bool publishCurrentPosition;
+    bool publishCurrentDepthImage;
+    bool publishGlobalPointCloud;
+
+    // Switches regarding debugging information.
+    bool printCentroid;
+    bool printICPResults;
+
+    // Hyper parameters used for downsampling.
+    float downsamplingLeafSize;
+
+    // Hyper parameters used for outlier removal.
+    double outlierRemovalRadiusSearch;
+    int outlierRemovalMinNeighborsInRadius;
+    int outlierRemovalNeighborsToCheck;
+    double outlierRemovalStdDeviationMultiplier;
+
+    // Hyper parameters used for registration.
+    int icpMaxIterations;
+    double icpTransformationEpsilon;
+    double icpMaxCorrespondenceDistance;
+    double icpRansacOutlierRejectionThreshold;
+    double icpEuclideanFitnessEpsilon;
+
+    // Sensor intrinsics of the short throw depth sensor.
+    float shortThrowMinDepth;
+    float shortThrowMinReliableDepth;
+    float shortThrowMaxReliableDepth;
+    float shortThrowMaxDepth;
+
+    // Sensor intrinsics of the long throw depth sensor.
+    float longThrowMinDepth;
+    float longThrowMinReliableDepth;
+    float longThrowMaxReliableDepth;
+    float longThrowMaxDepth;
+
 private:
+    // The directions (in camera space) in which each pixel of the depth frames points at.
     hololens_point_cloud_msgs::PixelDirections::ConstPtr shortThrowDirections;
     hololens_point_cloud_msgs::PixelDirections::ConstPtr longThrowDirections;
 
+    // ROS publishers.
     ros::Publisher shortThrowImagePublisher;
     ros::Publisher longThrowImagePublisher;
     ros::Publisher pointCloudPublisher;
     ros::Publisher hololensPositionPublisher;
-
     tf::TransformBroadcaster hololensCamPublisher;
 
+    // Sequence numbers used for publishing the results.
     uint32_t shortThrowSequenceNumber;
     uint32_t longThrowSequenceNumber;
     uint32_t pointCloudSequenceNumber;
 
+    // The global point cloud.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud;
 
+    // A mutex used for mutual exclusion when accessing the global point cloud.
     boost::mutex pointCloudMutex;
 };

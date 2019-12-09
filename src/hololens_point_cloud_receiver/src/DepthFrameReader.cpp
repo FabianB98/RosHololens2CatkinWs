@@ -1,8 +1,9 @@
 #include "DepthFrameReader.h"
 
-DepthFrameReader::DepthFrameReader(SpatialMapper* mapper)
+DepthFrameReader::DepthFrameReader(SpatialMapper* mappers[], int size)
 {
-    spatialMapper = mapper;
+    spatialMappers = mappers;
+    numMappers = size;
 }
 
 void DepthFrameReader::processRecording(const std_msgs::String::ConstPtr& msg)
@@ -15,8 +16,14 @@ void DepthFrameReader::processRecording(const std_msgs::String::ConstPtr& msg)
     ROS_INFO("Processing recording \"%s\"...", recordingDirectory.c_str());
 
     // Load the pixel directions and process them with the spatial mapper.
-    spatialMapper->handleShortThrowPixelDirections(loadPixelDirections(shortThrowPixelDirsFile));
-    spatialMapper->handleLongThrowPixelDirections(loadPixelDirections(longThrowPixelDirsFile));
+    hololens_point_cloud_msgs::PixelDirections::ConstPtr shortThrowDirs = loadPixelDirections(shortThrowPixelDirsFile);
+    hololens_point_cloud_msgs::PixelDirections::ConstPtr longThrowDirs = loadPixelDirections(longThrowPixelDirsFile);
+
+    for (int i = 0; i < numMappers; ++i)
+    {
+        spatialMappers[i]->handleShortThrowPixelDirections(shortThrowDirs);
+        spatialMappers[i]->handleLongThrowPixelDirections(longThrowDirs);
+    }
 
     // Get information about all stored depth frames and sort them in in lexical order. Sorting the frames in
     // lexical order is done to assert that the frames will be processed in the order in which they were captured.
@@ -35,9 +42,11 @@ void DepthFrameReader::processRecording(const std_msgs::String::ConstPtr& msg)
 
         // Process the current depth frame.
         if (isLongThrow)
-            spatialMapper->handleLongThrowDepthFrame(depthFrame);
+            for (int i = 0; i < numMappers; ++i)
+                spatialMappers[i]->handleLongThrowDepthFrame(depthFrame);
         else
-            spatialMapper->handleShortThrowDepthFrame(depthFrame);
+            for (int i = 0; i < numMappers; ++i)
+                spatialMappers[i]->handleShortThrowDepthFrame(depthFrame);
     }
 
     ROS_INFO("Finished processing recording \"%s\"!", recordingDirectory.c_str());

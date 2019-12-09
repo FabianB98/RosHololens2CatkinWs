@@ -2,6 +2,7 @@
 
 #include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
+#include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
@@ -12,7 +13,7 @@
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
-//                             SWITCHES FOR CHANGING THE BEHAVIOUR OF THE SPATIAL MAPPER                              //
+//                         SWITCHES FOR CHANGING THE DEFAULT BEHAVIOUR OF THE SPATIAL MAPPER                          //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
@@ -25,14 +26,24 @@
 // Switches indicating which filter algorithms should be executed.
 // Should new point clouds (i.e. non-registered point clouds calculated from the depth frames) be downsampled?
 #define DOWNSAMPLE_NEW_CLOUD true
-// Should outliers be removed from new point clouds?
-#define REMOVE_OUTLIERS true
+// Should outliers be removed from new point clouds with a radius outlier removal filter?
+#define REMOVE_OUTLIERS_RADIUS true
+// Should outliers be removed from new point clouds with a statistical outlier removal filter?
+#define REMOVE_OUTLIERS_STATISTICAL false
 // Should the global point cloud be downsampled after the new point cloud was registered to it?
 #define DOWNSAMPLE_GLOBAL_CLOUD true
 
 // Switches regarding the registration of new point clouds to the global point cloud.
 // Should ICP be used for registering the new point cloud to the global point cloud?
 #define USE_ICP false
+
+// Switches indicating which results should be published.
+// Should the current position of the HoloLens be published?
+#define PUBLISH_POSITION true
+// Should the current depth image be published?
+#define PUBLISH_DEPTH_IMAGE true
+// Should the resulting point cloud be published?
+#define PUBLISH_POINT_CLOUD true
 
 // Switches regarding debugging information.
 // Should the centroid of new point clouds be calculated and printed to the console?
@@ -42,20 +53,31 @@
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
-//                                      HYPER-PARAMETERS FOR THE USED ALGORITHMS                                      //
+//                                  DEFAULT HYPER PARAMETERS FOR THE USED ALGORITHMS                                  //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
 // Parameters for the voxel grid filter used for downsampling.
 #define DOWNSAMPLING_LEAF_SIZE 0.01f
 
+// Parameters for the radius outlier removal filter used for removing outliers.
+#define OUTLIER_REMOVAL_RADIUS_SEARCH 0.05
+#define OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS 9
+
 // Parameters for the statistical outlier removal filter used for removing outliers.
 #define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 10
 #define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.5
 
+// Parameters for ICP used for the registration of new point clouds to the global cloud.
+#define ICP_MAX_ITERATIONS 20
+#define ICP_TRANSFORMATION_EPSILON 1e-12
+#define ICP_MAX_CORRESPONDENCE_DISTANCE 0.1
+#define ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD 0.001
+#define ICP_EUCLIDEAN_FITNESS_EPSILON 1.0
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
-//                               DEPTH RANGES (TOTAL AND RELIABLE) OF THE DEPTH SENSORS                               //
+//                           DEFAULT DEPTH RANGES (TOTAL AND RELIABLE) OF THE DEPTH SENSORS                           //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
@@ -68,7 +90,7 @@
 // The depth sensor intrinsics of the long throw depth sensor.
 #define LONG_THROW_MIN_DEPTH 0.5f           // The minimum depth value which the sensor can report.
 #define LONG_THROW_MIN_RELIABLE_DEPTH 0.85f // The minimum depth value to use. Smaller depth values will be discarded.
-#define LONG_THROW_MAX_RELIABLE_DEPTH 3.01f // The maximum depth value to use. Greater depth values will be discarded.
+#define LONG_THROW_MAX_RELIABLE_DEPTH 3.3f  // The maximum depth value to use. Greater depth values will be discarded.
 #define LONG_THROW_MAX_DEPTH 4.0f           // The maximum depth value which the sensor can report.
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -77,36 +99,75 @@
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
-SpatialMapper::SpatialMapper(ros::NodeHandle n)
+SpatialMapper::SpatialMapper(
+    ros::NodeHandle n, 
+    const std::string shortThrowImageTopic, 
+    const std::string longThrowImageTopic,
+    const std::string pointCloudTopic,
+    const std::string hololensPositionTopic)
 {
     ROS_INFO("Creating SpatialMapper...");
+
+    // Initialize all switches to their default value.
+    useShortThrow = USE_SHORT_THROW;
+    useLongThrow = USE_LONG_THROW;
+    downsampleNewCloud = DOWNSAMPLE_NEW_CLOUD;
+    removeOutliersRadiusNewCloud = REMOVE_OUTLIERS_RADIUS;
+    removeOutliersStatisticalNewCloud = REMOVE_OUTLIERS_STATISTICAL;
+    downsampleGlobalCloud = DOWNSAMPLE_GLOBAL_CLOUD;
+    useICP = USE_ICP;
+    publishCurrentPosition = PUBLISH_POSITION;
+    publishCurrentDepthImage = PUBLISH_DEPTH_IMAGE;
+    publishGlobalPointCloud = PUBLISH_POINT_CLOUD;
+    printCentroid = PRINT_CENTROID;
+    printICPResults = PRINT_ICP_RESULTS;
+
+    // Initialize all hyper parameters to their default value.
+    downsamplingLeafSize = DOWNSAMPLING_LEAF_SIZE;
+    outlierRemovalRadiusSearch = OUTLIER_REMOVAL_RADIUS_SEARCH;
+    outlierRemovalMinNeighborsInRadius = OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS;
+    outlierRemovalNeighborsToCheck = OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK;
+    outlierRemovalStdDeviationMultiplier = OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER;
+    icpMaxIterations = ICP_MAX_ITERATIONS;
+    icpTransformationEpsilon = ICP_TRANSFORMATION_EPSILON;
+    icpMaxCorrespondenceDistance = ICP_MAX_CORRESPONDENCE_DISTANCE;
+    icpRansacOutlierRejectionThreshold = ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD;
+    icpEuclideanFitnessEpsilon = ICP_EUCLIDEAN_FITNESS_EPSILON;
+
+    // Initialize all sensor intrinsics to their default value.
+    shortThrowMinDepth = SHORT_THROW_MIN_DEPTH;
+    shortThrowMinReliableDepth = SHORT_THROW_MIN_RELIABLE_DEPTH;
+    shortThrowMaxReliableDepth = SHORT_THROW_MAX_RELIABLE_DEPTH;
+    shortThrowMaxDepth = SHORT_THROW_MAX_DEPTH;
+    longThrowMinDepth = LONG_THROW_MIN_DEPTH;
+    longThrowMinReliableDepth = LONG_THROW_MIN_RELIABLE_DEPTH;
+    longThrowMaxReliableDepth = LONG_THROW_MAX_RELIABLE_DEPTH;
+    longThrowMaxDepth = LONG_THROW_MAX_DEPTH;
 
     // Initialize the point cloud.
     pointCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
 
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
-    shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(SHORT_THROW_IMAGE_TOPIC, 10);
-    longThrowImagePublisher = n.advertise<sensor_msgs::Image>(LONG_THROW_IMAGE_TOPIC, 10);
-    pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(POINT_CLOUD_TOPIC, 10);
-    hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(HOLOLENS_POSITION_TOPIC, 10);
+    shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(shortThrowImageTopic, 10);
+    longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
+    pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(pointCloudTopic, 10);
+    hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(hololensPositionTopic, 10);
 }
 
 void SpatialMapper::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a short throw depth frame!");
-    if (USE_SHORT_THROW)
-        handleDepthFrame(msg, shortThrowDirections, SHORT_THROW_MIN_DEPTH, SHORT_THROW_MIN_RELIABLE_DEPTH,
-                SHORT_THROW_MAX_RELIABLE_DEPTH, SHORT_THROW_MAX_DEPTH, shortThrowImagePublisher, 
-                &shortThrowSequenceNumber);
+    if (useShortThrow)
+        handleDepthFrame(msg, shortThrowDirections, shortThrowMinDepth, shortThrowMinReliableDepth,
+                shortThrowMaxReliableDepth, shortThrowMaxDepth, shortThrowImagePublisher, &shortThrowSequenceNumber);
 }
 
 void SpatialMapper::handleLongThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
 {
     ROS_INFO("Received a long throw depth frame!");
-    if (USE_LONG_THROW)
-        handleDepthFrame(msg, longThrowDirections, LONG_THROW_MIN_DEPTH, LONG_THROW_MIN_RELIABLE_DEPTH, 
-                LONG_THROW_MAX_RELIABLE_DEPTH, LONG_THROW_MAX_DEPTH, longThrowImagePublisher, 
-                &longThrowSequenceNumber);
+    if (useLongThrow)
+        handleDepthFrame(msg, longThrowDirections, longThrowMinDepth, longThrowMinReliableDepth, 
+                longThrowMaxReliableDepth, longThrowMaxDepth, longThrowImagePublisher, &longThrowSequenceNumber);
 }
 
 void SpatialMapper::handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg)
@@ -137,9 +198,14 @@ void SpatialMapper::handleDepthFrame(
             depthFrame->depthMapPixelStride, false);
 
     // Publish the depth map as well as the current position of the HoloLens.
-    publishHololensPosition(depthFrame);
-    publishHololensCamToWorldTf(depthFrame);
-    publishDepthImage(depthMap, imagePublisher, sequenceNumber, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    if (publishCurrentPosition)
+    {
+        publishHololensPosition(depthFrame);
+        publishHololensCamToWorldTf(depthFrame);
+    }
+    if (publishCurrentDepthImage)
+        publishDepthImage(depthMap, imagePublisher, sequenceNumber, minDepth, minReliableDepth, maxReliableDepth, 
+                maxDepth);
 
     // Calculate the point cloud (in camera space).
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = computePointCloudFromDepthMap(depthMap, pixelDirections,
@@ -149,12 +215,17 @@ void SpatialMapper::handleDepthFrame(
     if (pointCloudCamSpace->size() == 0)
         return;
 
-    // Downsample the point cloud and remove outliers.
-    if (DOWNSAMPLE_NEW_CLOUD)
-        pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, DOWNSAMPLING_LEAF_SIZE);
-    if (REMOVE_OUTLIERS)
-        pointCloudCamSpace = removeOutliers(pointCloudCamSpace, OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK, 
-                OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER);
+    // Downsample the point cloud to ensure that the point density is not too high.
+    if (downsampleNewCloud)
+        pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, downsamplingLeafSize);
+
+    // Remove outliers (measurement errors, extremely noisy values, ...) from the point cloud.
+    if (removeOutliersRadiusNewCloud)
+        pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch, 
+                outlierRemovalMinNeighborsInRadius);
+    if (removeOutliersStatisticalNewCloud)
+        pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck, 
+                outlierRemovalStdDeviationMultiplier);
 
     // Assert that there is at least one point in the filtered point cloud.
     if (pointCloudCamSpace->size() == 0)
@@ -168,7 +239,8 @@ void SpatialMapper::handleDepthFrame(
     ROS_INFO("Total point cloud consists of %zu points.", combinedPointCloud->size());
 
     // Publish the point cloud.
-    publishPointCloud(combinedPointCloud);
+    if (publishGlobalPointCloud)
+        publishPointCloud(combinedPointCloud);
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::computePointCloudFromDepthMap(
@@ -241,7 +313,26 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::downsamplePointCloud(
     return pointCloudDownsampled;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliers(
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliersRadius(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+    const float radiusSearch,
+    const int minNeighborsInRadius)
+{
+    // Create a point cloud in which we will store the results.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudFiltered (new pcl::PointCloud<pcl::PointXYZ>());
+
+    // Remove outliers by using a radius outlier removal.
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> radiusOutlierRemoval;
+    radiusOutlierRemoval.setInputCloud(pointCloudToFilter);
+    radiusOutlierRemoval.setRadiusSearch(radiusSearch);
+    radiusOutlierRemoval.setMinNeighborsInRadius(minNeighborsInRadius);
+    radiusOutlierRemoval.filter(*pointCloudFiltered);
+
+    // Return the point cloud with the outliers removed.
+    return pointCloudFiltered;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::removeOutliersStatistical(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
     const float numNeighborsToCheck,
     const float standardDeviationMultiplier)
@@ -269,7 +360,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Transform the point cloud from camera space to world space.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
-    if (pointCloud->size() != 0 && USE_ICP) 
+    if (pointCloud->size() != 0 && useICP) 
     {
         // There exists some part of the global point cloud, so we need to align the given point cloud. Use ICP to
         // align the given point cloud to the global point cloud.
@@ -277,10 +368,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
         // Set the parameters for ICP.
         icp.setMaximumIterations(1);
-        icp.setTransformationEpsilon(1e-12);
-        icp.setMaxCorrespondenceDistance(0.1);
-        icp.setRANSACOutlierRejectionThreshold(0.001);
-        icp.setEuclideanFitnessEpsilon(1);
+        icp.setTransformationEpsilon(icpTransformationEpsilon);
+        icp.setMaxCorrespondenceDistance(icpMaxCorrespondenceDistance);
+        icp.setRANSACOutlierRejectionThreshold(icpRansacOutlierRejectionThreshold);
+        icp.setEuclideanFitnessEpsilon(icpEuclideanFitnessEpsilon);
 
         // Set source (i.e. the given point cloud) and target (i.e. the global point cloud) point clouds for ICP.
         icp.setInputSource(pointCloudCamSpace);
@@ -290,14 +381,14 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
         icp.align(*pointCloudWorldSpace, camToWorld);
 
         unsigned int iteration = 1;
-        while (!icp.hasConverged() && iteration < 20)
+        while (!icp.hasConverged() && iteration < icpMaxIterations)
         {
             icp.align(*pointCloudWorldSpace, icp.getFinalTransformation());
             iteration++;
         }
 
         // Print information about the results of ICP.
-        if (PRINT_ICP_RESULTS)
+        if (printICPResults)
         {
             ROS_INFO("Has converged? %s", icp.hasConverged() ? "true" : "false");
             ROS_INFO("Num iterations: %u", iteration);
@@ -312,7 +403,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     }
 
     // Calculate the centroid of the point cloud from the new frame.
-    if (PRINT_CENTROID)
+    if (printCentroid)
     {
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*pointCloudWorldSpace, centroid);
@@ -325,9 +416,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
 
     // Downsample the concatenated point cloud to avoid a point density which is higher than what is needed.
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
-    if (DOWNSAMPLE_GLOBAL_CLOUD) 
+    if (downsampleGlobalCloud) 
     {
-        cloud = downsamplePointCloud(pointCloud, DOWNSAMPLING_LEAF_SIZE);
+        cloud = downsamplePointCloud(pointCloud, downsamplingLeafSize);
         pointCloud = cloud;
     }
 
