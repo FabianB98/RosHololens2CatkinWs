@@ -1,13 +1,20 @@
 #include "SpatialMapper.h"
 
+#include <pcl/common/angles.h>
 #include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
+#include <pcl/filters/extract_indices.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
+#include <pcl/ModelCoefficients.h>
 #include <pcl/registration/icp.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/sample_consensus/ransac.h>
+#include <pcl/segmentation/sac_segmentation.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 
@@ -557,6 +564,64 @@ void SpatialMapper::publishDepthImage(
     publisher.publish(image);
 }
 
+void SpatialMapper::findPlanes()
+{
+    ROS_INFO("Finding planes in the point cloud...");
+
+    pointCloudMutex.lock();
+
+    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients());
+    pcl::PointIndices::Ptr inliers (new pcl::PointIndices());
+
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+    seg.setAxis(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
+    seg.setEpsAngle(pcl::deg2rad(1.0));
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setMaxIterations(1000);
+    seg.setDistanceThreshold(0.03);
+    seg.setOptimizeCoefficients(true);
+
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planes (new pcl::PointCloud<pcl::PointXYZ>());
+
+    int i = 0;
+    std::size_t numPoints = cloud->points.size();
+
+    while (cloud->points.size() > 0.3 * numPoints)
+    {
+        seg.setInputCloud(cloud);
+        seg.segment(*inliers, *coefficients);
+        if (inliers->indices.size() == 0)
+            break;
+        ++i;
+        
+        extract.setInputCloud(cloud);
+        extract.setIndices(inliers);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
+        extract.setNegative(false);
+        extract.filter(*plane);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
+        extract.setNegative(true);
+        extract.filter(*remainder);
+
+        ROS_INFO("Found a plane consisting of %zu points!", plane->points.size());
+
+        *planes += *plane;
+        publishPointCloud(planes);
+        
+        cloud = remainder;
+    }
+
+    pointCloudMutex.unlock();
+
+    ROS_INFO("Found %i planes!", i);
+}
+
 void SpatialMapper::clearPointCloud()
 {
     ROS_INFO("Clearing point cloud...");
@@ -583,9 +648,16 @@ void SpatialMapper::savePointCloud()
 
     // Save the point cloud in both PCD and PLY file format.
     pointCloudMutex.lock();
-    pcl::io::savePCDFileASCII(prefix + ".pcd", *pointCloud);
-    pcl::io::savePLYFileASCII(prefix + ".ply", *pointCloud);
+    bool notEmpty = pointCloud->size() > 0;
+    if (notEmpty)
+    {
+        pcl::io::savePCDFileASCII(prefix + ".pcd", *pointCloud);
+        pcl::io::savePLYFileASCII(prefix + ".ply", *pointCloud);
+    }
     pointCloudMutex.unlock();
 
-    ROS_INFO("Saved point cloud!");
+    if (notEmpty)
+        ROS_INFO("Saved point cloud!");
+    else
+        ROS_INFO("Couldn't save point cloud as it doesn't contain any points!");
 }

@@ -16,6 +16,7 @@ class ControlGuiPlugin(Plugin):
 
     clearPublisher = rospy.Publisher('/clearPointCloud', Bool, queue_size=10)
     savePublisher = rospy.Publisher('/savePointCloud', Bool, queue_size=10)
+    findPlanesPublisher = rospy.Publisher('/findPlanes', Bool, queue_size=10)
     recordPublisher = rospy.Publisher('/recordDepthFrames', Bool, queue_size=10)
     loadPublisher = rospy.Publisher('/loadRecording', String, queue_size=10)
 
@@ -57,6 +58,7 @@ class ControlGuiPlugin(Plugin):
         # Register the callbacks.
         self._widget.clear_button.clicked.connect(self.clear_button_clicked)
         self._widget.save_button.clicked.connect(self.save_button_clicked)
+        self._widget.find_planes_button.clicked.connect(self.find_planes_button_clicked)
         self._widget.record_button.clicked.connect(self.record_button_clicked)
         self._widget.load_button.clicked.connect(self.load_button_clicked)
 
@@ -70,6 +72,7 @@ class ControlGuiPlugin(Plugin):
         # TODO unregister all publishers here
         self.clearPublisher.unregister()
         self.savePublisher.unregister()
+        self.findPlanesPublisher.unregister()
         self.recordPublisher.unregister()
         self.loadPublisher.unregister()
         pass
@@ -111,6 +114,7 @@ class ControlGuiPlugin(Plugin):
     def updateToRealtimeSpatialMapperUi(self):
         self._widget.clear_button.show()
         self._widget.save_button.show()
+        self._widget.find_planes_button.show()
         self._widget.record_button.hide()
         self._widget.recording_directory_input.hide()
         self._widget.load_button.hide()
@@ -118,6 +122,7 @@ class ControlGuiPlugin(Plugin):
     def updateToDepthFrameRecorderUi(self):
         self._widget.clear_button.hide()
         self._widget.save_button.hide()
+        self._widget.find_planes_button.hide()
         self._widget.record_button.show()
         self._widget.recording_directory_input.hide()
         self._widget.load_button.hide()
@@ -125,6 +130,7 @@ class ControlGuiPlugin(Plugin):
     def updateToRecordedSpatialMapperUi(self):
         self._widget.clear_button.show()
         self._widget.save_button.show()
+        self._widget.find_planes_button.show()
         self._widget.record_button.hide()
         self._widget.recording_directory_input.show()
         self._widget.load_button.show()
@@ -136,6 +142,10 @@ class ControlGuiPlugin(Plugin):
     def save_button_clicked(self, checked):
         rospy.loginfo('Save button clicked.')
         self.savePublisher.publish(True)
+
+    def find_planes_button_clicked(self, checked):
+        rospy.loginfo('Find planes button clicked.')
+        self.findPlanesPublisher.publish(True)
     
     def record_button_clicked(self, checked):
         rospy.loginfo('Record button clicked: ' + str(checked))

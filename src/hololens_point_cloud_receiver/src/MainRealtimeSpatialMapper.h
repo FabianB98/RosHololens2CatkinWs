@@ -12,3 +12,4 @@ void longThrowPixelDirectionsCallback(const hololens_point_cloud_msgs::PixelDire
 
 void clearPointCloudCallback(const std_msgs::Bool::ConstPtr& msg);
 void savePointCloudCallback(const std_msgs::Bool::ConstPtr& msg);
+void findPlanesCallback(const std_msgs::Bool::ConstPtr& msg);

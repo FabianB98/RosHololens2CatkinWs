@@ -45,6 +45,9 @@ public:
     void handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
     void handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 
+    // Callbacks for finding planes in the point cloud.
+    void findPlanes();
+
     // Callbacks for clearing and saving the point cloud.
     void clearPointCloud();
     void savePointCloud();
