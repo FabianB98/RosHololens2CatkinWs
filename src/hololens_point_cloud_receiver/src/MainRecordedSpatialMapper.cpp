@@ -44,5 +44,5 @@ void savePointCloudCallback(const std_msgs::Bool::ConstPtr& msg)
 
 void findPlanesCallback(const std_msgs::Bool::ConstPtr& msg)
 {
-    spatialMapper->findPlanes();
+    spatialMapper->detectPlanes();
 }

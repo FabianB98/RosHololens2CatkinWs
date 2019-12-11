@@ -14,6 +14,7 @@
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/ransac.h>
+#include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
 
 #include <pcl_conversions/pcl_conversions.h>
@@ -159,6 +160,11 @@ SpatialMapper::SpatialMapper(
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
     pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(pointCloudTopic, 10);
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(hololensPositionTopic, 10);
+
+    // Advertise additional topics for debugging information. As these publishers are intended for debugging purposes,
+    // it is very likely that they'll eventually be removed again.
+    additionalPublishers.push_back(n.advertise<sensor_msgs::PointCloud2>("/pointCloudPlanes", 10));
+    additionalPublishers.push_back(n.advertise<sensor_msgs::PointCloud2>("/pointCloudRemainder", 10));
 }
 
 void SpatialMapper::handleShortThrowDepthFrame(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& msg)
@@ -436,7 +442,123 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     return cloud;
 }
 
-void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+void SpatialMapper::detectPlanes()
+{
+    ROS_INFO("Detecting planes in the point cloud...");
+
+    // Lock the point cloud mutex as we're about to detect planes in the global point cloud.
+    pointCloudMutex.lock();
+
+    // Create the objects for saving the determined plane coefficients and the inliers.
+    pcl::ModelCoefficients::Ptr coefficientsHorizontal (new pcl::ModelCoefficients());
+    pcl::ModelCoefficients::Ptr coefficientsVertical (new pcl::ModelCoefficients());
+    pcl::PointIndices::Ptr inliersHorizontal (new pcl::PointIndices());
+    pcl::PointIndices::Ptr inliersVertical (new pcl::PointIndices());
+
+    // Set up the parameters for RANSAC.
+    pcl::SACSegmentation<pcl::PointXYZ> seg;
+    seg.setAxis(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
+    seg.setEpsAngle(pcl::deg2rad(1.0));
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setMaxIterations(1000);
+    seg.setDistanceThreshold(0.04);
+    seg.setOptimizeCoefficients(true);
+
+    // Create an indices extractor for removing the detect planes from the global point cloud.
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
+
+    // Create a point cloud for the detect planes.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planes (new pcl::PointCloud<pcl::PointXYZ>());
+
+    // Iteratively use RANSAC to find the next plane until a stop condition is met.
+    int i = 0;
+    std::size_t numPoints = cloud->points.size();
+    while (cloud->points.size() >= 0.2 * numPoints)
+    {
+        // Use the current remainder of the global point cloud as input cloud for RANSAC.
+        seg.setInputCloud(cloud);
+
+        // Try to find a horizontal plane candidate.
+        seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+        seg.segment(*inliersHorizontal, *coefficientsHorizontal);
+
+        // Try to find a vertical plane candidate.
+        seg.setModelType(pcl::SACMODEL_PARALLEL_PLANE);
+        seg.segment(*inliersVertical, *coefficientsVertical);
+
+        // Determine whether the plane candidates both contain too less points. If that's the case, stop the loop.
+        std::size_t numHorizontal = inliersHorizontal->indices.size();
+        std::size_t numVertical = inliersVertical->indices.size();
+        std::size_t maxInliers = std::max(numHorizontal, numVertical);
+        if (maxInliers <= 0.02 * numPoints || maxInliers <= 25000)
+            break;
+        
+        // Determine which of both plane candidates has the most points and use that plane for point extraction.
+        extract.setInputCloud(cloud);
+        extract.setIndices(numHorizontal >= numVertical ? inliersHorizontal : inliersVertical);
+
+        // Extract the detected plane from the point cloud.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
+        extract.setNegative(false);
+        extract.filter(*plane);
+
+        // Extract the remainder (everything except the detected plane) from the point cloud.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
+        extract.setNegative(true);
+        extract.filter(*remainder);
+
+        ROS_INFO("Detected a plane consisting of %zu points!", plane->points.size());
+
+        // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do
+        // not belong to the object which should be represented by the plane.
+        pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
+        tree->setInputCloud(plane);
+        std::vector<pcl::PointIndices> clusters;
+        pcl::EuclideanClusterExtraction<pcl::PointXYZ> clusterExtraction;
+        clusterExtraction.setClusterTolerance(0.03);
+        clusterExtraction.setMinClusterSize(1000);
+        clusterExtraction.setSearchMethod(tree);
+        clusterExtraction.setInputCloud(plane);
+        clusterExtraction.extract(clusters);
+
+        ROS_INFO("Detected %zu clusters in the detected plane!", clusters.size());
+
+        // Iterate over all found clusters.
+        for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
+        {
+            ROS_INFO("Cluster contains of %zu points!", iter->indices.size());
+
+            pcl::PointIndices::Ptr indices (new pcl::PointIndices());
+            std::copy(iter->indices.begin(), iter->indices.end(), std::back_inserter(indices->indices));
+
+            // Create a point cloud representing the current cluster.
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cluster (new pcl::PointCloud<pcl::PointXYZ>());
+            extract.setInputCloud(plane);
+            extract.setIndices(indices);
+            extract.setNegative(false);
+            extract.filter(*cluster);
+
+            // TODO: Do something with the cluster.
+        }
+
+        // Add the current plane to the detected planes.
+        *planes += *plane;
+        publishPointCloud(planes, &additionalPublishers[0]);
+        publishPointCloud(remainder, &additionalPublishers[1]);
+        
+        // Use the current remainder as the input for the next iteration.
+        cloud = remainder;
+        ++i;
+    }
+
+    // Can't find any more planes. Therefore, we can unlock the point cloud mutex.
+    pointCloudMutex.unlock();
+
+    ROS_INFO("Detected %i planes!", i);
+}
+
+void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher)
 {
     // Create the ROS message for the point cloud and store the point cloud inside it.
     sensor_msgs::PointCloud2 pointCloudMessage;
@@ -448,7 +570,10 @@ void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
     pointCloudMessage.header.frame_id = "hololens_world";
 
     // Publish the message.
-    pointCloudPublisher.publish(pointCloudMessage);
+    if (publisher != NULL)
+        publisher->publish(pointCloudMessage);
+    else
+        pointCloudPublisher.publish(pointCloudMessage);
 }
 
 void SpatialMapper::publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame)
@@ -562,64 +687,6 @@ void SpatialMapper::publishDepthImage(
     
     // Publish the message.
     publisher.publish(image);
-}
-
-void SpatialMapper::findPlanes()
-{
-    ROS_INFO("Finding planes in the point cloud...");
-
-    pointCloudMutex.lock();
-
-    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients());
-    pcl::PointIndices::Ptr inliers (new pcl::PointIndices());
-
-    pcl::SACSegmentation<pcl::PointXYZ> seg;
-    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-    seg.setAxis(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
-    seg.setEpsAngle(pcl::deg2rad(1.0));
-    seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setMaxIterations(1000);
-    seg.setDistanceThreshold(0.03);
-    seg.setOptimizeCoefficients(true);
-
-    pcl::ExtractIndices<pcl::PointXYZ> extract;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
-
-    pcl::PointCloud<pcl::PointXYZ>::Ptr planes (new pcl::PointCloud<pcl::PointXYZ>());
-
-    int i = 0;
-    std::size_t numPoints = cloud->points.size();
-
-    while (cloud->points.size() > 0.3 * numPoints)
-    {
-        seg.setInputCloud(cloud);
-        seg.segment(*inliers, *coefficients);
-        if (inliers->indices.size() == 0)
-            break;
-        ++i;
-        
-        extract.setInputCloud(cloud);
-        extract.setIndices(inliers);
-
-        pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
-        extract.setNegative(false);
-        extract.filter(*plane);
-
-        pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
-        extract.setNegative(true);
-        extract.filter(*remainder);
-
-        ROS_INFO("Found a plane consisting of %zu points!", plane->points.size());
-
-        *planes += *plane;
-        publishPointCloud(planes);
-        
-        cloud = remainder;
-    }
-
-    pointCloudMutex.unlock();
-
-    ROS_INFO("Found %i planes!", i);
 }
 
 void SpatialMapper::clearPointCloud()

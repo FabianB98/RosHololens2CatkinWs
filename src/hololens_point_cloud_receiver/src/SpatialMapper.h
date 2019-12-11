@@ -45,8 +45,8 @@ public:
     void handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
     void handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 
-    // Callbacks for finding planes in the point cloud.
-    void findPlanes();
+    // Callbacks for detecting planes in the point cloud.
+    void detectPlanes();
 
     // Callbacks for clearing and saving the point cloud.
     void clearPointCloud();
@@ -98,7 +98,7 @@ private:
         Eigen::Matrix4f camToWorld);
 
     // Methods for publishing the results.
-    void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+    void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher = NULL);
     void publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishHololensCamToWorldTf(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishDepthImage(
@@ -175,6 +175,7 @@ private:
     ros::Publisher pointCloudPublisher;
     ros::Publisher hololensPositionPublisher;
     tf::TransformBroadcaster hololensCamPublisher;
+    std::vector<ros::Publisher> additionalPublishers;
 
     // Sequence numbers used for publishing the results.
     uint32_t shortThrowSequenceNumber;
