@@ -25,6 +25,7 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/segmentation/sac_segmentation.h>
 
 #include <tf/transform_broadcaster.h>
 
@@ -97,6 +98,19 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
         Eigen::Matrix4f camToWorld);
 
+    // Detects all clusters in the given point cloud.
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> detectClusters(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+        const double clusterTolerance);
+
+    // Detects planes in the given input cloud and clusters the cloud into planes and remainder.
+    int detectPlanes(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr inputCloud, 
+        pcl::PointCloud<pcl::PointXYZ>::Ptr planes, 
+        pcl::PointCloud<pcl::PointXYZ>::Ptr remainder,
+        const std::size_t totalCloudSize,
+        pcl::SACSegmentation<pcl::PointXYZ> seg);
+
     // Methods for publishing the results.
     void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher = NULL);
     void publishHololensPosition(const hololens_point_cloud_msgs::DepthFrame::ConstPtr& depthFrame);
@@ -151,6 +165,15 @@ public:
     double icpMaxCorrespondenceDistance;
     double icpRansacOutlierRejectionThreshold;
     double icpEuclideanFitnessEpsilon;
+
+    // Hyper parameters used for plane detection.
+    double planeDetectionEpsAngle;
+    double planeDetectionDistanceThreshold;
+    int planeDetectionMaxRansacIterations;
+    int planeDetectionMinInliersAbsolute;
+    double planeDetectionMinInliersRelative;
+    int planeDetectionKeepClusterAbsolute;
+    double planeDetectionKeepClusterRelative;
 
     // Sensor intrinsics of the short throw depth sensor.
     float shortThrowMinDepth;

@@ -66,22 +66,31 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
 // Parameters for the voxel grid filter used for downsampling.
-#define DOWNSAMPLING_LEAF_SIZE 0.01f
+#define DOWNSAMPLING_LEAF_SIZE 0.01f    // At most one point allowed in a voxel within this edge length.
 
 // Parameters for the radius outlier removal filter used for removing outliers.
-#define OUTLIER_REMOVAL_RADIUS_SEARCH 0.05
-#define OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS 9
+#define OUTLIER_REMOVAL_RADIUS_SEARCH 0.05          // The radius in which to search for neighbors.
+#define OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS 9   // The minimum amount of neighbors which have to be in the radius.
 
 // Parameters for the statistical outlier removal filter used for removing outliers.
-#define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 10
-#define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.5
+#define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 10           // The amount of nearest neighbors to check.
+#define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.5    // How far off the nearest neighbors may be from the std dev.
 
 // Parameters for ICP used for the registration of new point clouds to the global cloud.
-#define ICP_MAX_ITERATIONS 20
-#define ICP_TRANSFORMATION_EPSILON 1e-12
-#define ICP_MAX_CORRESPONDENCE_DISTANCE 0.1
-#define ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD 0.001
-#define ICP_EUCLIDEAN_FITNESS_EPSILON 1.0
+#define ICP_MAX_ITERATIONS 20                           // The maximum amount of iterations to perform.
+#define ICP_TRANSFORMATION_EPSILON 1e-12                // Changes less than this value result in convergence.
+#define ICP_MAX_CORRESPONDENCE_DISTANCE 0.1             // The maximum distance to use for checking for correspondences.
+#define ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD 0.001    // Points closer than this value can't be outliers.
+#define ICP_EUCLIDEAN_FITNESS_EPSILON 1.0               // A fitness worse than this value results in an abortion.
+
+// Parameters for detecting planes.
+#define PLANE_DETECTION_EPS_ANGLE 1.0               // The maximum angle deviation from horizontal or vertical planes.
+#define PLANE_DETECTION_DISTANCE_THRESHOLD 0.04     // Points closer than this values are considered as inliers.
+#define PLANE_DETECTION_MAX_RANSAC_ITERATIONS 1000  // The maximum amount of RANSAC iterations to perform per plane.
+#define PLANE_DETECTION_MIN_INLIERS_ABSOLUTE 10000  // A plane must have at least this many absolute inliers and...
+#define PLANE_DETECTION_MIN_INLIERS_RELATIVE 0.02   // ...this many inliers relative to the size of the global cloud.
+#define PLANE_DETECTION_KEEP_CLUSTER_ABSOLUTE 10000 // A cluster of a plane must have at least this many points or...
+#define PLANE_DETECTION_KEEP_CLUSTER_RELATIVE 0.25  // ...this many points relative to the planes inliers.
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
@@ -141,6 +150,13 @@ SpatialMapper::SpatialMapper(
     icpMaxCorrespondenceDistance = ICP_MAX_CORRESPONDENCE_DISTANCE;
     icpRansacOutlierRejectionThreshold = ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD;
     icpEuclideanFitnessEpsilon = ICP_EUCLIDEAN_FITNESS_EPSILON;
+    planeDetectionEpsAngle = PLANE_DETECTION_EPS_ANGLE;
+    planeDetectionDistanceThreshold = PLANE_DETECTION_DISTANCE_THRESHOLD;
+    planeDetectionMaxRansacIterations = PLANE_DETECTION_MAX_RANSAC_ITERATIONS;
+    planeDetectionMinInliersAbsolute = PLANE_DETECTION_MIN_INLIERS_ABSOLUTE;
+    planeDetectionMinInliersRelative = PLANE_DETECTION_MIN_INLIERS_RELATIVE;
+    planeDetectionKeepClusterAbsolute = PLANE_DETECTION_KEEP_CLUSTER_ABSOLUTE;
+    planeDetectionKeepClusterRelative = PLANE_DETECTION_KEEP_CLUSTER_RELATIVE;
 
     // Initialize all sensor intrinsics to their default value.
     shortThrowMinDepth = SHORT_THROW_MIN_DEPTH;
@@ -442,120 +458,196 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     return cloud;
 }
 
+std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> SpatialMapper::detectClusters(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+        const double clusterTolerance)
+{
+    // Set up a KD tree for searching inside the cloud.
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
+    tree->setInputCloud(cloudToCluster);
+    
+    // Create a vector for storing the detected point indices of each cluster.
+    std::vector<pcl::PointIndices> clusters;
+
+    // Extract the clusters of the point cloud.
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> clusterExtraction;
+    clusterExtraction.setClusterTolerance(clusterTolerance);
+    clusterExtraction.setSearchMethod(tree);
+    clusterExtraction.setInputCloud(cloudToCluster);
+    clusterExtraction.extract(clusters);
+
+    // Create an indices extractor for removing each cluster from the cloud.
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    extract.setInputCloud(cloudToCluster);
+
+    // Iterate over all found clusters and create a point cloud for each cluster.
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusterClouds;
+    for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
+    {
+        // Create a pointer to the point indices of the current cluster. The copying is needed because boost will free
+        // the pointer after the point cloud was created, which would in term free some part of the clusters vector
+        // causing weird side effects (i.e. the application might crash) in later iterations of this loop.
+        pcl::PointIndices::Ptr indices (new pcl::PointIndices());
+        std::copy(iter->indices.begin(), iter->indices.end(), std::back_inserter(indices->indices));
+
+        // Create a point cloud representing the current cluster.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster (new pcl::PointCloud<pcl::PointXYZ>());
+        extract.setIndices(indices);
+        extract.filter(*cluster);
+
+        // Add the point cloud to the vector of clusters.
+        clusterClouds.push_back(cluster);
+    }
+
+    // Return the point clouds representing the clusters.
+    return clusterClouds;
+}
+
 void SpatialMapper::detectPlanes()
 {
-    ROS_INFO("Detecting planes in the point cloud...");
+    ROS_INFO("Detecting planes in the point cloud... Depending on the clouds size, this may take a few minutes.");
 
-    // Lock the point cloud mutex as we're about to detect planes in the global point cloud.
-    pointCloudMutex.lock();
-
-    // Create the objects for saving the determined plane coefficients and the inliers.
-    pcl::ModelCoefficients::Ptr coefficientsHorizontal (new pcl::ModelCoefficients());
-    pcl::ModelCoefficients::Ptr coefficientsVertical (new pcl::ModelCoefficients());
-    pcl::PointIndices::Ptr inliersHorizontal (new pcl::PointIndices());
-    pcl::PointIndices::Ptr inliersVertical (new pcl::PointIndices());
+    // Create point clouds for the detected planes and the remainder.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planes (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
 
     // Set up the parameters for RANSAC.
     pcl::SACSegmentation<pcl::PointXYZ> seg;
     seg.setAxis(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
-    seg.setEpsAngle(pcl::deg2rad(1.0));
+    seg.setEpsAngle(pcl::deg2rad(planeDetectionEpsAngle));
     seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setMaxIterations(1000);
-    seg.setDistanceThreshold(0.04);
+    seg.setMaxIterations(planeDetectionMaxRansacIterations);
+    seg.setDistanceThreshold(planeDetectionDistanceThreshold);
     seg.setOptimizeCoefficients(true);
 
-    // Create an indices extractor for removing the detect planes from the global point cloud.
-    pcl::ExtractIndices<pcl::PointXYZ> extract;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pointCloud;
-
-    // Create a point cloud for the detect planes.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr planes (new pcl::PointCloud<pcl::PointXYZ>());
-
-    // Iteratively use RANSAC to find the next plane until a stop condition is met.
-    int i = 0;
-    std::size_t numPoints = cloud->points.size();
-    while (cloud->points.size() >= 0.2 * numPoints)
-    {
-        // Use the current remainder of the global point cloud as input cloud for RANSAC.
-        seg.setInputCloud(cloud);
-
-        // Try to find a horizontal plane candidate.
-        seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-        seg.segment(*inliersHorizontal, *coefficientsHorizontal);
-
-        // Try to find a vertical plane candidate.
-        seg.setModelType(pcl::SACMODEL_PARALLEL_PLANE);
-        seg.segment(*inliersVertical, *coefficientsVertical);
-
-        // Determine whether the plane candidates both contain too less points. If that's the case, stop the loop.
-        std::size_t numHorizontal = inliersHorizontal->indices.size();
-        std::size_t numVertical = inliersVertical->indices.size();
-        std::size_t maxInliers = std::max(numHorizontal, numVertical);
-        if (maxInliers <= 0.02 * numPoints || maxInliers <= 25000)
-            break;
-        
-        // Determine which of both plane candidates has the most points and use that plane for point extraction.
-        extract.setInputCloud(cloud);
-        extract.setIndices(numHorizontal >= numVertical ? inliersHorizontal : inliersVertical);
-
-        // Extract the detected plane from the point cloud.
-        pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
-        extract.setNegative(false);
-        extract.filter(*plane);
-
-        // Extract the remainder (everything except the detected plane) from the point cloud.
-        pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
-        extract.setNegative(true);
-        extract.filter(*remainder);
-
-        ROS_INFO("Detected a plane consisting of %zu points!", plane->points.size());
-
-        // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do
-        // not belong to the object which should be represented by the plane.
-        pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
-        tree->setInputCloud(plane);
-        std::vector<pcl::PointIndices> clusters;
-        pcl::EuclideanClusterExtraction<pcl::PointXYZ> clusterExtraction;
-        clusterExtraction.setClusterTolerance(0.03);
-        clusterExtraction.setMinClusterSize(1000);
-        clusterExtraction.setSearchMethod(tree);
-        clusterExtraction.setInputCloud(plane);
-        clusterExtraction.extract(clusters);
-
-        ROS_INFO("Detected %zu clusters in the detected plane!", clusters.size());
-
-        // Iterate over all found clusters.
-        for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
-        {
-            ROS_INFO("Cluster contains of %zu points!", iter->indices.size());
-
-            pcl::PointIndices::Ptr indices (new pcl::PointIndices());
-            std::copy(iter->indices.begin(), iter->indices.end(), std::back_inserter(indices->indices));
-
-            // Create a point cloud representing the current cluster.
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cluster (new pcl::PointCloud<pcl::PointXYZ>());
-            extract.setInputCloud(plane);
-            extract.setIndices(indices);
-            extract.setNegative(false);
-            extract.filter(*cluster);
-
-            // TODO: Do something with the cluster.
-        }
-
-        // Add the current plane to the detected planes.
-        *planes += *plane;
-        publishPointCloud(planes, &additionalPublishers[0]);
-        publishPointCloud(remainder, &additionalPublishers[1]);
-        
-        // Use the current remainder as the input for the next iteration.
-        cloud = remainder;
-        ++i;
-    }
-
-    // Can't find any more planes. Therefore, we can unlock the point cloud mutex.
+    // Recursively detect planes using the global point cloud as the initial cluster.
+    pointCloudMutex.lock();
+    int numPlanes = detectPlanes(pointCloud, planes, remainder, pointCloud->points.size(), seg);
     pointCloudMutex.unlock();
 
-    ROS_INFO("Detected %i planes!", i);
+    // TODO: Remove the following block of code later on.
+    publishPointCloud(planes, &additionalPublishers[0]);
+    publishPointCloud(remainder, &additionalPublishers[1]);
+
+    ROS_INFO("Detected %i planes!", numPlanes);
+}
+
+int SpatialMapper::detectPlanes(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr inputCloud,
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planes, 
+    pcl::PointCloud<pcl::PointXYZ>::Ptr remainder,
+    const std::size_t totalCloudSize,
+    pcl::SACSegmentation<pcl::PointXYZ> seg)
+{
+    // In case the input cloud contains too less points, abort.
+    if (inputCloud->size() < planeDetectionMinInliersAbsolute)
+    {
+        *remainder += *inputCloud;
+        return 0;
+    }
+
+    // Set the input cloud for determining plane candidates.
+    seg.setInputCloud(inputCloud);
+
+    // Try to find a horizontal plane candidate.
+    pcl::PointIndices::Ptr inliersHorizontal (new pcl::PointIndices());
+    pcl::ModelCoefficients::Ptr coefficientsHorizontal (new pcl::ModelCoefficients());
+    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+    seg.segment(*inliersHorizontal, *coefficientsHorizontal);
+
+    // Try to find a vertical plane candidate.
+    pcl::PointIndices::Ptr inliersVertical (new pcl::PointIndices());
+    pcl::ModelCoefficients::Ptr coefficientsVertical (new pcl::ModelCoefficients());
+    seg.setModelType(pcl::SACMODEL_PARALLEL_PLANE);
+    seg.segment(*inliersVertical, *coefficientsVertical);
+
+    // Determine whether the plane candidates both contain too less points. If that's the case, abort.
+    std::size_t numHorizontal = inliersHorizontal->indices.size();
+    std::size_t numVertical = inliersVertical->indices.size();
+    std::size_t maxInliers = std::max(numHorizontal, numVertical);
+    if (maxInliers <= planeDetectionMinInliersRelative * totalCloudSize 
+            || maxInliers <= planeDetectionMinInliersAbsolute)
+    {
+        *remainder += *inputCloud;
+        return 0;
+    }
+    
+    // Determine which of both plane candidates has the most points and use that plane for point extraction.
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    extract.setInputCloud(inputCloud);
+    extract.setIndices(numHorizontal >= numVertical ? inliersHorizontal : inliersVertical);
+
+    // Extract the detected plane from the point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
+    extract.setNegative(false);
+    extract.filter(*plane);
+
+    // Extract the remainder (everything except the detected plane) from the point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr rem (new pcl::PointCloud<pcl::PointXYZ>());
+    extract.setNegative(true);
+    extract.filter(*rem);
+
+    // TODO: Remove the following line of code later on...
+    ROS_INFO("Detected a plane consisting of %zu points!", plane->points.size());
+
+    // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do not
+    // belong to the object which should be represented by the plane.
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> planeClusters = 
+            detectClusters(plane, planeDetectionDistanceThreshold);
+
+    // TODO: Remove the following line of code later on...
+    ROS_INFO("Detected %zu clusters in the detected plane!", planeClusters.size());
+
+    // Iterate over all found clusters and add clusters which are big enough to the clustered plane.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planeClustered (new pcl::PointCloud<pcl::PointXYZ>());
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>::const_iterator clusterIterator;
+    for (clusterIterator = planeClusters.begin(); clusterIterator != planeClusters.end(); ++clusterIterator)
+    {
+        // Determine whether the current cluster is part of the plane or the remainder.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
+        std::size_t absolutePoints = cluster->points.size();
+        double relativePoints = static_cast<double>(absolutePoints) / static_cast<double>(plane->points.size());
+        bool keepCluster = absolutePoints >= planeDetectionKeepClusterAbsolute 
+                || relativePoints >= planeDetectionKeepClusterRelative;
+
+        // If the cluster is big enough, add it to the clustered plane, otherwise add it to the remainder.
+        if (keepCluster)
+        {
+            *planeClustered += *cluster;
+
+            // TODO: Remove the following line of code later on...
+            ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the clustered plane.",
+                    absolutePoints, relativePoints * 100.0);
+        }
+        else
+        {
+            *rem += *cluster;
+
+            // TODO: Remove the following line of code later on...
+            ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the remainder cloud.",
+                    absolutePoints, relativePoints * 100.0);
+        }
+    }
+
+    // We have found a plane. Add it to the cloud of planes.
+    int numPlanes = 1;
+    *planes += *planeClustered;
+
+    // TODO: Remove the following block of code later on.
+    publishPointCloud(planeClustered, &additionalPublishers[0]);
+    publishPointCloud(rem, &additionalPublishers[1]);
+
+    // Extract the clusters of the of the remainder and recursively find planes in each cluster.
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> remainderClusters = 
+            detectClusters(rem, 1.5 * planeDetectionDistanceThreshold);
+    for (clusterIterator = remainderClusters.begin(); clusterIterator != remainderClusters.end(); ++clusterIterator)
+    {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
+        numPlanes += detectPlanes(cluster, planes, remainder, totalCloudSize, seg);
+    }
+
+    // Return the amount of detected planes.
+    return numPlanes;
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher)
@@ -697,6 +789,8 @@ void SpatialMapper::clearPointCloud()
     pointCloudMutex.lock();
     pointCloud->clear();
     publishPointCloud(pointCloud);
+    for (size_t i = 0; i < additionalPublishers.size(); ++i)
+        publishPointCloud(pointCloud, &additionalPublishers[i]);
     pointCloudMutex.unlock();
 }
 

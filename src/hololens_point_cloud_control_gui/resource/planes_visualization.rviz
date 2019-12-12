@@ -3,8 +3,7 @@ Panels:
     Help Height: 78
     Name: Displays
     Property Tree Widget:
-      Expanded:
-        - /Point Cloud1/Status1
+      Expanded: ~
       Splitter Ratio: 0.5
     Tree Height: 470
   - Class: rviz/Selection
@@ -25,7 +24,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: Point Cloud
+    SyncSource: ""
 Visualization Manager:
   Class: ""
   Displays:
