@@ -3,6 +3,7 @@
 #include <pcl/common/angles.h>
 #include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
+#include <pcl/features/normal_3d.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -458,7 +459,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     return cloud;
 }
 
-std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> SpatialMapper::detectClusters(
+std::vector<pcl::PointIndices> SpatialMapper::detectClusterIndices(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
         const double clusterTolerance)
 {
@@ -475,6 +476,17 @@ std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> SpatialMapper::detectClusters(
     clusterExtraction.setSearchMethod(tree);
     clusterExtraction.setInputCloud(cloudToCluster);
     clusterExtraction.extract(clusters);
+
+    // Return the resulting cluster indices.
+    return clusters;
+}
+
+std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> SpatialMapper::detectClusters(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+        const double clusterTolerance)
+{
+    // Detect the point indices of all clusters.
+    std::vector<pcl::PointIndices> clusters = detectClusterIndices(cloudToCluster, clusterTolerance);
 
     // Create an indices extractor for removing each cluster from the cloud.
     pcl::ExtractIndices<pcl::PointXYZ> extract;
@@ -503,6 +515,51 @@ std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> SpatialMapper::detectClusters(
     return clusterClouds;
 }
 
+std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> >
+        SpatialMapper::detectClusters(
+                const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+                const pcl::PointCloud<pcl::Normal>::Ptr cloudNormals,
+                const double clusterTolerance)
+{
+    // Detect the point indices of all clusters.
+    std::vector<pcl::PointIndices> clusters = detectClusterIndices(cloudToCluster, clusterTolerance);
+
+    // Create an indices extractor for removing the points of each cluster from the point cloud.
+    pcl::ExtractIndices<pcl::PointXYZ> extractPoints;
+    extractPoints.setInputCloud(cloudToCluster);
+
+    // Create an indices extractor for removing the normals of each cluster from the normals cloud.
+    pcl::ExtractIndices<pcl::Normal> extractNormals;
+    extractNormals.setInputCloud(cloudNormals);
+
+    // Iterate over all found clusters and create a point cloud for each cluster.
+    std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> > clusterClouds;
+    for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
+    {
+        // Create a pointer to the point indices of the current cluster. The copying is needed because boost will free
+        // the pointer after the point cloud was created, which would in term free some part of the clusters vector
+        // causing weird side effects (i.e. the application might crash) in later iterations of this loop.
+        pcl::PointIndices::Ptr indices (new pcl::PointIndices());
+        std::copy(iter->indices.begin(), iter->indices.end(), std::back_inserter(indices->indices));
+
+        // Create a point cloud representing the points of the current cluster.
+        pcl::PointCloud<pcl::PointXYZ>::Ptr clusterPoints (new pcl::PointCloud<pcl::PointXYZ>());
+        extractPoints.setIndices(indices);
+        extractPoints.filter(*clusterPoints);
+
+        // Create a point cloud representing the normals of the current cluster.
+        pcl::PointCloud<pcl::Normal>::Ptr clusterNormals (new pcl::PointCloud<pcl::Normal>());
+        extractNormals.setIndices(indices);
+        extractNormals.filter(*clusterNormals);
+
+        // Add the point cloud to the vector of clusters.
+        clusterClouds.push_back(std::make_pair(clusterPoints, clusterNormals));
+    }
+
+    // Return the point clouds representing the clusters.
+    return clusterClouds;
+}
+
 void SpatialMapper::detectPlanes()
 {
     ROS_INFO("Detecting planes in the point cloud... Depending on the clouds size, this may take a few minutes.");
@@ -512,17 +569,31 @@ void SpatialMapper::detectPlanes()
     pcl::PointCloud<pcl::PointXYZ>::Ptr remainder (new pcl::PointCloud<pcl::PointXYZ>());
 
     // Set up the parameters for RANSAC.
-    pcl::SACSegmentation<pcl::PointXYZ> seg;
-    seg.setAxis(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
+    pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg;
     seg.setEpsAngle(pcl::deg2rad(planeDetectionEpsAngle));
+    seg.setNormalDistanceWeight(0.1);
     seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setModelType(pcl::SACMODEL_NORMAL_PLANE);
     seg.setMaxIterations(planeDetectionMaxRansacIterations);
     seg.setDistanceThreshold(planeDetectionDistanceThreshold);
     seg.setOptimizeCoefficients(true);
 
-    // Recursively detect planes using the global point cloud as the initial cluster.
+    // Lock the point cloud mutex as we're about to start detecting planes.
     pointCloudMutex.lock();
-    int numPlanes = detectPlanes(pointCloud, planes, remainder, pointCloud->points.size(), seg);
+
+    // Estimate the normals of the point cloud.
+    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+    ne.setInputCloud(pointCloud);
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
+    ne.setSearchMethod(tree);
+    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals (new pcl::PointCloud<pcl::Normal>);
+    ne.setRadiusSearch(planeDetectionDistanceThreshold);
+    ne.compute(*cloudNormals);
+
+    // Recursively detect planes using the global point cloud as the initial cluster.
+    int numPlanes = detectPlanes(pointCloud, cloudNormals, planes, remainder, pointCloud->points.size(), seg);
+
+    // We're done detecting planes and can therefore unlock the point cloud mutex.
     pointCloudMutex.unlock();
 
     // TODO: Remove the following block of code later on.
@@ -534,10 +605,11 @@ void SpatialMapper::detectPlanes()
 
 int SpatialMapper::detectPlanes(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr inputCloud,
+    const pcl::PointCloud<pcl::Normal>::Ptr cloudNormals,
     pcl::PointCloud<pcl::PointXYZ>::Ptr planes, 
     pcl::PointCloud<pcl::PointXYZ>::Ptr remainder,
     const std::size_t totalCloudSize,
-    pcl::SACSegmentation<pcl::PointXYZ> seg)
+    pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg)
 {
     // In case the input cloud contains too less points, abort.
     if (inputCloud->size() < planeDetectionMinInliersAbsolute)
@@ -548,72 +620,83 @@ int SpatialMapper::detectPlanes(
 
     // Set the input cloud for determining plane candidates.
     seg.setInputCloud(inputCloud);
+    seg.setInputNormals(cloudNormals);
 
-    // Try to find a horizontal plane candidate.
-    pcl::PointIndices::Ptr inliersHorizontal (new pcl::PointIndices());
-    pcl::ModelCoefficients::Ptr coefficientsHorizontal (new pcl::ModelCoefficients());
-    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-    seg.segment(*inliersHorizontal, *coefficientsHorizontal);
+    // Try to find a plane candidate.
+    pcl::PointIndices::Ptr inliers (new pcl::PointIndices());
+    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients());
+    seg.segment(*inliers, *coefficients);
 
-    // Try to find a vertical plane candidate.
-    pcl::PointIndices::Ptr inliersVertical (new pcl::PointIndices());
-    pcl::ModelCoefficients::Ptr coefficientsVertical (new pcl::ModelCoefficients());
-    seg.setModelType(pcl::SACMODEL_PARALLEL_PLANE);
-    seg.segment(*inliersVertical, *coefficientsVertical);
-
-    // Determine whether the plane candidates both contain too less points. If that's the case, abort.
-    std::size_t numHorizontal = inliersHorizontal->indices.size();
-    std::size_t numVertical = inliersVertical->indices.size();
-    std::size_t maxInliers = std::max(numHorizontal, numVertical);
-    if (maxInliers <= planeDetectionMinInliersRelative * totalCloudSize 
-            || maxInliers <= planeDetectionMinInliersAbsolute)
+    // Determine whether the plane candidate contains too less points. If that's the case, abort.
+    std::size_t numInliers = inliers->indices.size();
+    if (numInliers <= planeDetectionMinInliersRelative * totalCloudSize
+            || numInliers <= planeDetectionMinInliersAbsolute)
     {
         *remainder += *inputCloud;
         return 0;
     }
     
-    // Determine which of both plane candidates has the most points and use that plane for point extraction.
-    pcl::ExtractIndices<pcl::PointXYZ> extract;
-    extract.setInputCloud(inputCloud);
-    extract.setIndices(numHorizontal >= numVertical ? inliersHorizontal : inliersVertical);
+    // Set up point extraction.
+    pcl::ExtractIndices<pcl::PointXYZ> extractPoints;
+    extractPoints.setInputCloud(inputCloud);
+    extractPoints.setIndices(inliers);
+    pcl::ExtractIndices<pcl::Normal> extractNormals;
+    extractNormals.setInputCloud(cloudNormals);
+    extractNormals.setIndices(inliers);
 
     // Extract the detected plane from the point cloud.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr plane (new pcl::PointCloud<pcl::PointXYZ>());
-    extract.setNegative(false);
-    extract.filter(*plane);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planePoints (new pcl::PointCloud<pcl::PointXYZ>());
+    extractPoints.setNegative(false);
+    extractPoints.filter(*planePoints);
+    pcl::PointCloud<pcl::Normal>::Ptr planeNormals (new pcl::PointCloud<pcl::Normal>());
+    extractNormals.setNegative(false);
+    extractNormals.filter(*planeNormals);
 
     // Extract the remainder (everything except the detected plane) from the point cloud.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr rem (new pcl::PointCloud<pcl::PointXYZ>());
-    extract.setNegative(true);
-    extract.filter(*rem);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr remPoints (new pcl::PointCloud<pcl::PointXYZ>());
+    extractPoints.setNegative(true);
+    extractPoints.filter(*remPoints);
+    pcl::PointCloud<pcl::Normal>::Ptr remNormals (new pcl::PointCloud<pcl::Normal>());
+    extractNormals.setNegative(true);
+    extractNormals.filter(*remNormals);
 
-    // TODO: Remove the following line of code later on...
-    ROS_INFO("Detected a plane consisting of %zu points!", plane->points.size());
+    // TODO: Remove the following block of code later on.
+    ROS_INFO("Detected a plane consisting of %zu points!", planePoints->points.size());
+    publishPointCloud(planePoints, &additionalPublishers[0]);
+    publishPointCloud(remPoints, &additionalPublishers[1]);
+
+    // *planes += *planePoints;
+    // return detectPlanes(remPoints, remNormals, planes, remainder, totalCloudSize, seg) + 1;
 
     // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do not
     // belong to the object which should be represented by the plane.
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> planeClusters = 
-            detectClusters(plane, planeDetectionDistanceThreshold);
-
+    std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> > planeClusters =
+            detectClusters(planePoints, planeNormals, planeDetectionDistanceThreshold);
+    
     // TODO: Remove the following line of code later on...
     ROS_INFO("Detected %zu clusters in the detected plane!", planeClusters.size());
 
     // Iterate over all found clusters and add clusters which are big enough to the clustered plane.
     pcl::PointCloud<pcl::PointXYZ>::Ptr planeClustered (new pcl::PointCloud<pcl::PointXYZ>());
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>::const_iterator clusterIterator;
-    for (clusterIterator = planeClusters.begin(); clusterIterator != planeClusters.end(); ++clusterIterator)
+    std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> >::const_iterator it;
+    for (it = planeClusters.begin(); it != planeClusters.end(); ++it)
     {
+        // Get the points and the normals of the current cluster.
+        std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> cluster = *it;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr clusterPoints = cluster.first;
+        pcl::PointCloud<pcl::Normal>::Ptr clusterNormals = cluster.second;
+
         // Determine whether the current cluster is part of the plane or the remainder.
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
-        std::size_t absolutePoints = cluster->points.size();
-        double relativePoints = static_cast<double>(absolutePoints) / static_cast<double>(plane->points.size());
+        std::size_t absolutePoints = clusterPoints->points.size();
+        double relativePoints = static_cast<double>(absolutePoints) / static_cast<double>(planePoints->points.size());
         bool keepCluster = absolutePoints >= planeDetectionKeepClusterAbsolute 
                 || relativePoints >= planeDetectionKeepClusterRelative;
 
         // If the cluster is big enough, add it to the clustered plane, otherwise add it to the remainder.
         if (keepCluster)
         {
-            *planeClustered += *cluster;
+            *planeClustered += *clusterPoints;
+            //We don't need the normals of the plane. We can therefore ignore the normals in this case.
 
             // TODO: Remove the following line of code later on...
             ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the clustered plane.",
@@ -621,7 +704,8 @@ int SpatialMapper::detectPlanes(
         }
         else
         {
-            *rem += *cluster;
+            *remPoints += *clusterPoints;
+            *remNormals += *clusterNormals;
 
             // TODO: Remove the following line of code later on...
             ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the remainder cloud.",
@@ -635,19 +719,83 @@ int SpatialMapper::detectPlanes(
 
     // TODO: Remove the following block of code later on.
     publishPointCloud(planeClustered, &additionalPublishers[0]);
-    publishPointCloud(rem, &additionalPublishers[1]);
+    publishPointCloud(remPoints, &additionalPublishers[1]);
 
-    // Extract the clusters of the of the remainder and recursively find planes in each cluster.
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> remainderClusters = 
-            detectClusters(rem, 1.5 * planeDetectionDistanceThreshold);
-    for (clusterIterator = remainderClusters.begin(); clusterIterator != remainderClusters.end(); ++clusterIterator)
+    // Extract the clusters of the of the remainder and recursively detect planes in each cluster.
+    std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> > remainderClusters =
+            detectClusters(remPoints, remNormals, 1.5 * planeDetectionDistanceThreshold);
+    for (it = remainderClusters.begin(); it != remainderClusters.end(); ++it)
     {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
-        numPlanes += detectPlanes(cluster, planes, remainder, totalCloudSize, seg);
+        // Get the points and the normals of the current cluster.
+        std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> cluster = *it;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr clusterPoints = cluster.first;
+        pcl::PointCloud<pcl::Normal>::Ptr clusterNormals = cluster.second;
+
+        // Recursively detect planes in the current cluster.
+        numPlanes += detectPlanes(clusterPoints, clusterNormals, planes, remainder, totalCloudSize, seg);
     }
 
     // Return the amount of detected planes.
     return numPlanes;
+
+    // // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do not
+    // // belong to the object which should be represented by the plane.
+    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> planeClusters = 
+    //         detectClusters(planePoints, planeDetectionDistanceThreshold);
+
+    // // TODO: Remove the following line of code later on...
+    // ROS_INFO("Detected %zu clusters in the detected plane!", planeClusters.size());
+
+    // // Iterate over all found clusters and add clusters which are big enough to the clustered plane.
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr planeClustered (new pcl::PointCloud<pcl::PointXYZ>());
+    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>::const_iterator clusterIterator;
+    // for (clusterIterator = planeClusters.begin(); clusterIterator != planeClusters.end(); ++clusterIterator)
+    // {
+    //     // Determine whether the current cluster is part of the plane or the remainder.
+    //     pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
+    //     std::size_t absolutePoints = cluster->points.size();
+    //     double relativePoints = static_cast<double>(absolutePoints) / static_cast<double>(plane->points.size());
+    //     bool keepCluster = absolutePoints >= planeDetectionKeepClusterAbsolute 
+    //             || relativePoints >= planeDetectionKeepClusterRelative;
+
+    //     // If the cluster is big enough, add it to the clustered plane, otherwise add it to the remainder.
+    //     if (keepCluster)
+    //     {
+    //         *planeClustered += *cluster;
+
+    //         // TODO: Remove the following line of code later on...
+    //         ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the clustered plane.",
+    //                 absolutePoints, relativePoints * 100.0);
+    //     }
+    //     else
+    //     {
+    //         *remPoints += *cluster;
+
+    //         // TODO: Remove the following line of code later on...
+    //         ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the remainder cloud.",
+    //                 absolutePoints, relativePoints * 100.0);
+    //     }
+    // }
+
+    // // We have found a plane. Add it to the cloud of planes.
+    // int numPlanes = 1;
+    // *planes += *planeClustered;
+
+    // // TODO: Remove the following block of code later on.
+    // publishPointCloud(planeClustered, &additionalPublishers[0]);
+    // publishPointCloud(remPoints, &additionalPublishers[1]);
+
+    // // Extract the clusters of the of the remainder and recursively find planes in each cluster.
+    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> remainderClusters = 
+    //         detectClusters(remPoints, 1.5 * planeDetectionDistanceThreshold);
+    // for (clusterIterator = remainderClusters.begin(); clusterIterator != remainderClusters.end(); ++clusterIterator)
+    // {
+    //     pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
+    //     numPlanes += detectPlanes(cluster, planes, remainder, totalCloudSize, seg);
+    // }
+
+    // // Return the amount of detected planes.
+    // return numPlanes;
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher)

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <stdlib.h>
 #include <string>
 
@@ -98,18 +99,30 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
         Eigen::Matrix4f camToWorld);
 
+    // Detects the point indices of all clusters in the given point cloud.
+    std::vector<pcl::PointIndices> detectClusterIndices(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+        const double clusterTolerance);
+
     // Detects all clusters in the given point cloud.
     std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> detectClusters(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
         const double clusterTolerance);
 
+    // Detects all clusters in the given point cloud with normals.
+    std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> > detectClusters(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
+        const pcl::PointCloud<pcl::Normal>::Ptr cloudNormals,
+        const double clusterTolerance);
+
     // Detects planes in the given input cloud and clusters the cloud into planes and remainder.
     int detectPlanes(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr inputCloud, 
+        const pcl::PointCloud<pcl::Normal>::Ptr cloudNormals,
         pcl::PointCloud<pcl::PointXYZ>::Ptr planes, 
         pcl::PointCloud<pcl::PointXYZ>::Ptr remainder,
         const std::size_t totalCloudSize,
-        pcl::SACSegmentation<pcl::PointXYZ> seg);
+        pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg);
 
     // Methods for publishing the results.
     void publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher = NULL);
