@@ -3,7 +3,7 @@
 #include <pcl/common/angles.h>
 #include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
-#include <pcl/features/normal_3d.h>
+#include <pcl/features/normal_3d_omp.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -17,6 +17,7 @@
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/surface/mls.h>
 
 #include <pcl_conversions/pcl_conversions.h>
 
@@ -84,8 +85,12 @@
 #define ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD 0.001    // Points closer than this value can't be outliers.
 #define ICP_EUCLIDEAN_FITNESS_EPSILON 1.0               // A fitness worse than this value results in an abortion.
 
+// Parameters for estimating normals.
+#define NORMAL_ESTIMATION_SEARCH_RADIUS 0.07    // The radius in which to search for nearest neighbors.
+
 // Parameters for detecting planes.
 #define PLANE_DETECTION_EPS_ANGLE 1.0               // The maximum angle deviation from horizontal or vertical planes.
+#define PLANE_DETECTION_NORMAL_DISTANCE_WEIGHT 0.06 // Lower -> Points normal might deviate more from the planes normal.
 #define PLANE_DETECTION_DISTANCE_THRESHOLD 0.04     // Points closer than this values are considered as inliers.
 #define PLANE_DETECTION_MAX_RANSAC_ITERATIONS 1000  // The maximum amount of RANSAC iterations to perform per plane.
 #define PLANE_DETECTION_MIN_INLIERS_ABSOLUTE 10000  // A plane must have at least this many absolute inliers and...
@@ -107,7 +112,7 @@
 
 // The depth sensor intrinsics of the long throw depth sensor.
 #define LONG_THROW_MIN_DEPTH 0.5f           // The minimum depth value which the sensor can report.
-#define LONG_THROW_MIN_RELIABLE_DEPTH 0.85f // The minimum depth value to use. Smaller depth values will be discarded.
+#define LONG_THROW_MIN_RELIABLE_DEPTH 1.0f  // The minimum depth value to use. Smaller depth values will be discarded.
 #define LONG_THROW_MAX_RELIABLE_DEPTH 3.3f  // The maximum depth value to use. Greater depth values will be discarded.
 #define LONG_THROW_MAX_DEPTH 4.0f           // The maximum depth value which the sensor can report.
 
@@ -151,7 +156,9 @@ SpatialMapper::SpatialMapper(
     icpMaxCorrespondenceDistance = ICP_MAX_CORRESPONDENCE_DISTANCE;
     icpRansacOutlierRejectionThreshold = ICP_RANSAC_OUTLIER_REJECTION_THRESHOLD;
     icpEuclideanFitnessEpsilon = ICP_EUCLIDEAN_FITNESS_EPSILON;
+    normalEstimationSearchRadius = NORMAL_ESTIMATION_SEARCH_RADIUS;
     planeDetectionEpsAngle = PLANE_DETECTION_EPS_ANGLE;
+    planeDetectionNormalDistanceWeight = PLANE_DETECTION_NORMAL_DISTANCE_WEIGHT;
     planeDetectionDistanceThreshold = PLANE_DETECTION_DISTANCE_THRESHOLD;
     planeDetectionMaxRansacIterations = PLANE_DETECTION_MAX_RANSAC_ITERATIONS;
     planeDetectionMinInliersAbsolute = PLANE_DETECTION_MIN_INLIERS_ABSOLUTE;
@@ -459,6 +466,25 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     return cloud;
 }
 
+pcl::PointCloud<pcl::Normal>::Ptr SpatialMapper::estimateNormals(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToEstimateNormalsFor,
+    const double searchRadius)
+{
+    // Create a normal estimation instance as well as a KD tree.
+    pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> ne;
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
+
+    // Set the parameters for the normal estimation.
+    ne.setInputCloud(cloudToEstimateNormalsFor);
+    ne.setSearchMethod(tree);
+    ne.setRadiusSearch(searchRadius);
+
+    // Estimate the normals and return the result.
+    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals (new pcl::PointCloud<pcl::Normal>);
+    ne.compute(*cloudNormals);
+    return cloudNormals;
+}
+
 std::vector<pcl::PointIndices> SpatialMapper::detectClusterIndices(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
         const double clusterTolerance)
@@ -571,7 +597,7 @@ void SpatialMapper::detectPlanes()
     // Set up the parameters for RANSAC.
     pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> seg;
     seg.setEpsAngle(pcl::deg2rad(planeDetectionEpsAngle));
-    seg.setNormalDistanceWeight(0.1);
+    seg.setNormalDistanceWeight(planeDetectionNormalDistanceWeight);
     seg.setMethodType(pcl::SAC_RANSAC);
     seg.setModelType(pcl::SACMODEL_NORMAL_PLANE);
     seg.setMaxIterations(planeDetectionMaxRansacIterations);
@@ -581,16 +607,19 @@ void SpatialMapper::detectPlanes()
     // Lock the point cloud mutex as we're about to start detecting planes.
     pointCloudMutex.lock();
 
-    // Estimate the normals of the point cloud.
-    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
-    ne.setInputCloud(pointCloud);
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
-    ne.setSearchMethod(tree);
-    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals (new pcl::PointCloud<pcl::Normal>);
-    ne.setRadiusSearch(planeDetectionDistanceThreshold);
-    ne.compute(*cloudNormals);
+    // // Use moving least squares to smoothen the surfaces.
+    // pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr mlsPoints (new pcl::PointCloud<pcl::PointXYZ>());
+    // pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointXYZ> mls;
+    // mls.setComputeNormals(false);
+    // mls.setInputCloud(pointCloud);
+    // mls.setPolynomialOrder(2);
+    // mls.setSearchMethod(tree);
+    // mls.setSearchRadius(0.03);
+    // mls.process(*mlsPoints);
 
     // Recursively detect planes using the global point cloud as the initial cluster.
+    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals = estimateNormals(pointCloud, normalEstimationSearchRadius);
     int numPlanes = detectPlanes(pointCloud, cloudNormals, planes, remainder, pointCloud->points.size(), seg);
 
     // We're done detecting planes and can therefore unlock the point cloud mutex.
@@ -665,9 +694,6 @@ int SpatialMapper::detectPlanes(
     publishPointCloud(planePoints, &additionalPublishers[0]);
     publishPointCloud(remPoints, &additionalPublishers[1]);
 
-    // *planes += *planePoints;
-    // return detectPlanes(remPoints, remNormals, planes, remainder, totalCloudSize, seg) + 1;
-
     // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do not
     // belong to the object which should be represented by the plane.
     std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::Normal>::Ptr> > planeClusters =
@@ -737,65 +763,6 @@ int SpatialMapper::detectPlanes(
 
     // Return the amount of detected planes.
     return numPlanes;
-
-    // // Extract the clusters of the plane. This is done in order to avoid having points inside the plane which do not
-    // // belong to the object which should be represented by the plane.
-    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> planeClusters = 
-    //         detectClusters(planePoints, planeDetectionDistanceThreshold);
-
-    // // TODO: Remove the following line of code later on...
-    // ROS_INFO("Detected %zu clusters in the detected plane!", planeClusters.size());
-
-    // // Iterate over all found clusters and add clusters which are big enough to the clustered plane.
-    // pcl::PointCloud<pcl::PointXYZ>::Ptr planeClustered (new pcl::PointCloud<pcl::PointXYZ>());
-    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>::const_iterator clusterIterator;
-    // for (clusterIterator = planeClusters.begin(); clusterIterator != planeClusters.end(); ++clusterIterator)
-    // {
-    //     // Determine whether the current cluster is part of the plane or the remainder.
-    //     pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
-    //     std::size_t absolutePoints = cluster->points.size();
-    //     double relativePoints = static_cast<double>(absolutePoints) / static_cast<double>(plane->points.size());
-    //     bool keepCluster = absolutePoints >= planeDetectionKeepClusterAbsolute 
-    //             || relativePoints >= planeDetectionKeepClusterRelative;
-
-    //     // If the cluster is big enough, add it to the clustered plane, otherwise add it to the remainder.
-    //     if (keepCluster)
-    //     {
-    //         *planeClustered += *cluster;
-
-    //         // TODO: Remove the following line of code later on...
-    //         ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the clustered plane.",
-    //                 absolutePoints, relativePoints * 100.0);
-    //     }
-    //     else
-    //     {
-    //         *remPoints += *cluster;
-
-    //         // TODO: Remove the following line of code later on...
-    //         ROS_INFO("Cluster contains of %zu points (%lf%% of the plane)! Adding it to the remainder cloud.",
-    //                 absolutePoints, relativePoints * 100.0);
-    //     }
-    // }
-
-    // // We have found a plane. Add it to the cloud of planes.
-    // int numPlanes = 1;
-    // *planes += *planeClustered;
-
-    // // TODO: Remove the following block of code later on.
-    // publishPointCloud(planeClustered, &additionalPublishers[0]);
-    // publishPointCloud(remPoints, &additionalPublishers[1]);
-
-    // // Extract the clusters of the of the remainder and recursively find planes in each cluster.
-    // std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> remainderClusters = 
-    //         detectClusters(remPoints, 1.5 * planeDetectionDistanceThreshold);
-    // for (clusterIterator = remainderClusters.begin(); clusterIterator != remainderClusters.end(); ++clusterIterator)
-    // {
-    //     pcl::PointCloud<pcl::PointXYZ>::Ptr cluster = *clusterIterator;
-    //     numPlanes += detectPlanes(cluster, planes, remainder, totalCloudSize, seg);
-    // }
-
-    // // Return the amount of detected planes.
-    // return numPlanes;
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher)

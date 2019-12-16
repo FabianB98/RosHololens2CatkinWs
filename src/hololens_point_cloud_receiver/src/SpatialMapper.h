@@ -99,6 +99,11 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
         Eigen::Matrix4f camToWorld);
 
+    // Estimates the normals for the given point cloud.
+    pcl::PointCloud<pcl::Normal>::Ptr estimateNormals(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToEstimateNormalsFor,
+        const double searchRadius);
+
     // Detects the point indices of all clusters in the given point cloud.
     std::vector<pcl::PointIndices> detectClusterIndices(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
@@ -179,8 +184,12 @@ public:
     double icpRansacOutlierRejectionThreshold;
     double icpEuclideanFitnessEpsilon;
 
+    // Hyper parameters used for normal estimation.
+    double normalEstimationSearchRadius;
+
     // Hyper parameters used for plane detection.
     double planeDetectionEpsAngle;
+    double planeDetectionNormalDistanceWeight;
     double planeDetectionDistanceThreshold;
     int planeDetectionMaxRansacIterations;
     int planeDetectionMinInliersAbsolute;
