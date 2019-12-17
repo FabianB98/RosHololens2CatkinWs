@@ -47,7 +47,8 @@ public:
     void handleShortThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
     void handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 
-    // Callbacks for detecting planes in the point cloud.
+    // Callbacks for post processing the point cloud.
+    void smoothenPointCloud();
     void detectPlanes();
 
     // Callbacks for clearing and saving the point cloud.
@@ -167,6 +168,7 @@ public:
     // Switches regarding debugging information.
     bool printCentroid;
     bool printICPResults;
+    bool printPlaneDetectionResults;
 
     // Hyper parameters used for downsampling.
     float downsamplingLeafSize;
@@ -183,6 +185,10 @@ public:
     double icpMaxCorrespondenceDistance;
     double icpRansacOutlierRejectionThreshold;
     double icpEuclideanFitnessEpsilon;
+
+    // Hyper parameters used for smoothing the point cloud.
+    int mlsPolynomialOrder;
+    double mlsSearchRadius;
 
     // Hyper parameters used for normal estimation.
     double normalEstimationSearchRadius;

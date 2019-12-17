@@ -10,6 +10,7 @@
 #define CLEAR_POINT_CLOUD_TOPIC "/clearPointCloud"
 #define SAVE_POINT_CLOUD_TOPIC "/savePointCloud"
 
+#define SMOOTHEN_POINT_CLOUD_TOPIC "/smoothenPointCloud"
 #define FIND_PLANES_TOPIC "/findPlanes"
 
 #define HOLOLENS_POSITION_TOPIC "/hololensPosition"

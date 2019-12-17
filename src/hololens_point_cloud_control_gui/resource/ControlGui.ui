@@ -39,10 +39,23 @@
     <string>Save point cloud</string>
    </property>
   </widget>
-  <widget class="QPushButton" name="find_planes_button">
+  <widget class="QPushButton" name="smoothen_button">
    <property name="geometry">
     <rect>
      <x>10</x>
+     <y>50</y>
+     <width>150</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Smoothen cloud</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="find_planes_button">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
      <y>50</y>
      <width>150</width>
      <height>30</height>

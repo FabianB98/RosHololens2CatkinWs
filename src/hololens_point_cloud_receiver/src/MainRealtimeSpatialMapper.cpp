@@ -13,6 +13,7 @@ int main(int argc, char **argv)
     ros::Subscriber longThrowDirectionsSubscriber = n.subscribe(LONG_THROW_PIXEL_DIRECTIONS_TOPIC, 10, longThrowPixelDirectionsCallback);
     ros::Subscriber clearPointCloudSubscriber = n.subscribe(CLEAR_POINT_CLOUD_TOPIC, 10, clearPointCloudCallback);
     ros::Subscriber savePointCloudSubscriber = n.subscribe(SAVE_POINT_CLOUD_TOPIC, 10, savePointCloudCallback);
+    ros::Subscriber smoothenPointCloudSubscriber = n.subscribe(SMOOTHEN_POINT_CLOUD_TOPIC, 10, smoothenPointCloudCallback);
     ros::Subscriber findPlanesSubscriber = n.subscribe(FIND_PLANES_TOPIC, 10, findPlanesCallback);
 
     spatialMapper = new SpatialMapper(n);
@@ -55,6 +56,11 @@ void clearPointCloudCallback(const std_msgs::Bool::ConstPtr& msg)
 void savePointCloudCallback(const std_msgs::Bool::ConstPtr& msg)
 {
     spatialMapper->savePointCloud();
+}
+
+void smoothenPointCloudCallback(const std_msgs::Bool::ConstPtr& msg)
+{
+    spatialMapper->smoothenPointCloud();
 }
 
 void findPlanesCallback(const std_msgs::Bool::ConstPtr& msg)
