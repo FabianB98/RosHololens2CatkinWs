@@ -189,6 +189,8 @@ public:
     // Hyper parameters used for smoothing the point cloud.
     int mlsPolynomialOrder;
     double mlsSearchRadius;
+    double mlsOutlierRadiusSearch;
+    int mlsOutlierMinNeighborsInRadius;
 
     // Hyper parameters used for normal estimation.
     double normalEstimationSearchRadius;

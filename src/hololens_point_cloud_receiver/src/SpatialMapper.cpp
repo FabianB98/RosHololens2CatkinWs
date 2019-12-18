@@ -5,6 +5,7 @@
 #include <pcl/common/transforms.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/project_inliers.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
@@ -91,6 +92,10 @@
 #define MLS_POLYNOMIAL_ORDER 2  // The order of the polynomial function used to approximate the surface.
 #define MLS_SEARCH_RADIUS 0.04  // The search radius to use for determining the polynomial function.
 
+// Paramters for the radius outlier removal filter used after MLS has been applied.
+#define MLS_OUTLIER_RADIUS_SEARCH 6                 // The radius in which to search for neighbors.
+#define MLS_OUTLIER_MIN_NEIGHBORS_IN_RADIUS 0.03    // The minimum amount of neighbors which have to be in the radius.
+
 // Parameters for estimating normals.
 #define NORMAL_ESTIMATION_SEARCH_RADIUS 0.07    // The radius in which to search for nearest neighbors.
 
@@ -166,6 +171,8 @@ SpatialMapper::SpatialMapper(
     normalEstimationSearchRadius = NORMAL_ESTIMATION_SEARCH_RADIUS;
     mlsPolynomialOrder = MLS_POLYNOMIAL_ORDER;
     mlsSearchRadius = MLS_SEARCH_RADIUS;
+    mlsOutlierRadiusSearch = MLS_OUTLIER_RADIUS_SEARCH;
+    mlsOutlierMinNeighborsInRadius = MLS_OUTLIER_MIN_NEIGHBORS_IN_RADIUS;
     planeDetectionEpsAngle = PLANE_DETECTION_EPS_ANGLE;
     planeDetectionNormalDistanceWeight = PLANE_DETECTION_NORMAL_DISTANCE_WEIGHT;
     planeDetectionDistanceThreshold = PLANE_DETECTION_DISTANCE_THRESHOLD;
@@ -496,14 +503,18 @@ void SpatialMapper::smoothenPointCloud()
     pcl::PointCloud<pcl::PointXYZ>::Ptr mlsPoints (new pcl::PointCloud<pcl::PointXYZ>());
     mls.setInputCloud(pointCloud);
     mls.process(*mlsPoints);
-    pointCloud = mlsPoints;
+
+    // Remove outliers from the smoothed point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointsFiltered = 
+            removeOutliersRadius(mlsPoints, mlsOutlierRadiusSearch, mlsOutlierMinNeighborsInRadius);
+    pointCloud = pointsFiltered;
 
     // We're done smoothing the point cloud and can therefore unlock the point cloud mutex.
     pointCloudMutex.unlock();
 
     // Publish the point cloud.
     if (publishGlobalPointCloud)
-        publishPointCloud(mlsPoints);
+        publishPointCloud(pointsFiltered);
 
     ROS_INFO("Smoothed point cloud!");
 }
@@ -649,16 +660,25 @@ void SpatialMapper::detectPlanes()
     // Lock the point cloud mutex as we're about to start detecting planes.
     pointCloudMutex.lock();
 
-    // Recursively detect planes using the global point cloud as the initial cluster.
+    // Recursively detect and project planes using the global point cloud as the initial cluster.
     pcl::PointCloud<pcl::Normal>::Ptr cloudNormals = estimateNormals(pointCloud, normalEstimationSearchRadius);
     int numPlanes = detectPlanes(pointCloud, cloudNormals, planes, remainder, pointCloud->points.size(), seg);
+
+    // Recreate the global point cloud from the projected planes and the remainder.
+    pointCloud->clear();
+    *pointCloud += *planes;
+    *pointCloud += *remainder;
+    publishPointCloud(pointCloud);
 
     // We're done detecting planes and can therefore unlock the point cloud mutex.
     pointCloudMutex.unlock();
 
-    // TODO: Remove the following block of code later on.
-    publishPointCloud(planes, &additionalPublishers[0]);
-    publishPointCloud(remainder, &additionalPublishers[1]);
+    // Show debug information about all detected planes.
+    if (printPlaneDetectionResults)
+    {
+        publishPointCloud(planes, &additionalPublishers[0]);
+        publishPointCloud(remainder, &additionalPublishers[1]);
+    }
 
     ROS_INFO("Detected %i planes!", numPlanes);
 }
@@ -776,14 +796,22 @@ int SpatialMapper::detectPlanes(
         }
     }
 
+    // Project the inliers onto the detected plane.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planeProjected (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::ProjectInliers<pcl::PointXYZ> projectInliers;
+    projectInliers.setModelType(pcl::SACMODEL_PLANE);
+    projectInliers.setModelCoefficients(coefficients);
+    projectInliers.setInputCloud(planeClustered);
+    projectInliers.filter(*planeProjected);
+
     // We have found a plane. Add it to the cloud of planes.
     int numPlanes = 1;
-    *planes += *planeClustered;
+    *planes += *planeProjected;
 
     // Show debug information consisting of the clustered plane.
     if (printPlaneDetectionResults)
     {
-        publishPointCloud(planeClustered, &additionalPublishers[0]);
+        publishPointCloud(planeProjected, &additionalPublishers[0]);
         publishPointCloud(remPoints, &additionalPublishers[1]);
     }
 
