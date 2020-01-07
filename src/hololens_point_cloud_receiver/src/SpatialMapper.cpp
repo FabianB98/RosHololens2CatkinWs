@@ -93,8 +93,8 @@
 #define MLS_SEARCH_RADIUS 0.04  // The search radius to use for determining the polynomial function.
 
 // Paramters for the radius outlier removal filter used after MLS has been applied.
-#define MLS_OUTLIER_RADIUS_SEARCH 6                 // The radius in which to search for neighbors.
-#define MLS_OUTLIER_MIN_NEIGHBORS_IN_RADIUS 0.03    // The minimum amount of neighbors which have to be in the radius.
+#define MLS_OUTLIER_RADIUS_SEARCH 0.03          // The radius in which to search for neighbors.
+#define MLS_OUTLIER_MIN_NEIGHBORS_IN_RADIUS 6   // The minimum amount of neighbors which have to be in the radius.
 
 // Parameters for estimating normals.
 #define NORMAL_ESTIMATION_SEARCH_RADIUS 0.07    // The radius in which to search for nearest neighbors.
@@ -488,9 +488,12 @@ void SpatialMapper::smoothenPointCloud()
 
     // Initialize a KD tree and a MLS instance.
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
-    pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointXYZ> mls;
+    pcl::MovingLeastSquaresOMP<pcl::PointXYZ, pcl::PointXYZ> mls (boost::thread::hardware_concurrency());
+
+    unsigned int numThreads = boost::thread::hardware_concurrency();
 
     // Set up all parameters of MLS.
+    mls.setNumberOfThreads(numThreads);
     mls.setComputeNormals(false);
     mls.setPolynomialOrder(mlsPolynomialOrder);
     mls.setSearchMethod(tree);

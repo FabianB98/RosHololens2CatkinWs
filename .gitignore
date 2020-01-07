@@ -3,6 +3,7 @@
 
 # VS Code files
 src/.vscode/
+.vs/
 
 # Build results
 [Bb]uild/

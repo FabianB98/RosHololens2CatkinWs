@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(hololens_point_cloud_receiver)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -std=c++0x -fopenmp -fPIC")
+
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
 
