@@ -99,22 +99,25 @@ void DepthFrameRecorder::savePixelDirections(
     boost::filesystem::ofstream file(pixelDirectionsFilePath);
 
     // Write all pixel directions into the file.
-    for (uint32_t i = 0; i < pixelDirections->pixelDirections.size(); ++i)
+    if (pixelDirections)
     {
-        // Get the current pixel direction.
-        hololens_point_cloud_msgs::PixelDirection dir = pixelDirections->pixelDirections.at(i);
+        for (uint32_t i = 0; i < pixelDirections->pixelDirections.size(); ++i)
+        {
+            // Get the current pixel direction.
+            hololens_point_cloud_msgs::PixelDirection dir = pixelDirections->pixelDirections.at(i);
 
-        // Write the current pixel direction into the file.
-        file << boost::lexical_cast<std::string>(dir.u);
-        file << ";";
-        file << boost::lexical_cast<std::string>(dir.v);
-        file << ";";
-        file << boost::lexical_cast<std::string>(dir.direction.x);
-        file << ";";
-        file << boost::lexical_cast<std::string>(dir.direction.y);
-        file << ";";
-        file << boost::lexical_cast<std::string>(dir.direction.z);
-        file << "\n";
+            // Write the current pixel direction into the file.
+            file << boost::lexical_cast<std::string>(dir.u);
+            file << ";";
+            file << boost::lexical_cast<std::string>(dir.v);
+            file << ";";
+            file << boost::lexical_cast<std::string>(dir.direction.x);
+            file << ";";
+            file << boost::lexical_cast<std::string>(dir.direction.y);
+            file << ";";
+            file << boost::lexical_cast<std::string>(dir.direction.z);
+            file << "\n";
+        }
     }
     
     // Close the file.
