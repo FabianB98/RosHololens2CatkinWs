@@ -482,7 +482,31 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::registerPointCloud(
     return cloud;
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::doPostProcessing()
+{
+    // Lock the point cloud mutex as we're about to perform the post processing steps.
+    pointCloudMutex.lock();
+
+    // Perform the post processing steps (MLS, outlier removal, RANSAC).
+    pcl::PointCloud<pcl::PointXYZ>::Ptr smoothedCloud = smoothenPointCloud(pointCloud);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr projectedCloud = detectPlanes(pointCloud);
+    pointCloud = projectedCloud;
+
+    // We can unlock the point cloud mutex again as the post processing is done.
+    pointCloudMutex.unlock();
+
+    // Return the postprocessed spatial map.
+    return projectedCloud;
+}
+
 void SpatialMapper::smoothenPointCloud()
+{
+    pointCloudMutex.lock();
+    pointCloud = smoothenPointCloud(pointCloud);
+    pointCloudMutex.unlock();
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::smoothenPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
     ROS_INFO("Smoothing point cloud... Depending on the clouds size, this may take a few minutes.");
 
@@ -499,27 +523,22 @@ void SpatialMapper::smoothenPointCloud()
     mls.setSearchMethod(tree);
     mls.setSearchRadius(mlsSearchRadius);
 
-    // Lock the point cloud mutex as we're about to smoothen the point cloud.
-    pointCloudMutex.lock();
-
     // Smoothen the point cloud using MLS.
     pcl::PointCloud<pcl::PointXYZ>::Ptr mlsPoints (new pcl::PointCloud<pcl::PointXYZ>());
-    mls.setInputCloud(pointCloud);
+    mls.setInputCloud(cloud);
     mls.process(*mlsPoints);
 
     // Remove outliers from the smoothed point cloud.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointsFiltered = 
             removeOutliersRadius(mlsPoints, mlsOutlierRadiusSearch, mlsOutlierMinNeighborsInRadius);
-    pointCloud = pointsFiltered;
-
-    // We're done smoothing the point cloud and can therefore unlock the point cloud mutex.
-    pointCloudMutex.unlock();
 
     // Publish the point cloud.
     if (publishGlobalPointCloud)
         publishPointCloud(pointsFiltered);
 
     ROS_INFO("Smoothed point cloud!");
+
+    return pointsFiltered;
 }
 
 pcl::PointCloud<pcl::Normal>::Ptr SpatialMapper::estimateNormals(
@@ -644,6 +663,13 @@ std::vector<std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::
 
 void SpatialMapper::detectPlanes()
 {
+    pointCloudMutex.lock();
+    pointCloud = detectPlanes(pointCloud);
+    pointCloudMutex.unlock();
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::detectPlanes(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+{
     ROS_INFO("Detecting planes in the point cloud... Depending on the clouds size, this may take a few minutes.");
 
     // Create point clouds for the detected planes and the remainder.
@@ -660,21 +686,15 @@ void SpatialMapper::detectPlanes()
     seg.setDistanceThreshold(planeDetectionDistanceThreshold);
     seg.setOptimizeCoefficients(true);
 
-    // Lock the point cloud mutex as we're about to start detecting planes.
-    pointCloudMutex.lock();
-
     // Recursively detect and project planes using the global point cloud as the initial cluster.
-    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals = estimateNormals(pointCloud, normalEstimationSearchRadius);
-    int numPlanes = detectPlanes(pointCloud, cloudNormals, planes, remainder, pointCloud->points.size(), seg);
+    pcl::PointCloud<pcl::Normal>::Ptr cloudNormals = estimateNormals(cloud, normalEstimationSearchRadius);
+    int numPlanes = detectPlanes(cloud, cloudNormals, planes, remainder, cloud->points.size(), seg);
 
     // Recreate the global point cloud from the projected planes and the remainder.
-    pointCloud->clear();
-    *pointCloud += *planes;
-    *pointCloud += *remainder;
-    publishPointCloud(pointCloud);
-
-    // We're done detecting planes and can therefore unlock the point cloud mutex.
-    pointCloudMutex.unlock();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr result (new pcl::PointCloud<pcl::PointXYZ>());
+    *result += *planes;
+    *result += *remainder;
+    publishPointCloud(result);
 
     // Show debug information about all detected planes.
     if (printPlaneDetectionResults)
@@ -684,6 +704,8 @@ void SpatialMapper::detectPlanes()
     }
 
     ROS_INFO("Detected %i planes!", numPlanes);
+
+    return result;
 }
 
 int SpatialMapper::detectPlanes(
@@ -834,6 +856,18 @@ int SpatialMapper::detectPlanes(
 
     // Return the amount of detected planes.
     return numPlanes;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::getSpatialMap(bool performPostProcessing) 
+{
+    if (performPostProcessing)
+    {
+        return doPostProcessing();
+    }
+    else
+    {
+        return pointCloud;
+    }
 }
 
 void SpatialMapper::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher* publisher)

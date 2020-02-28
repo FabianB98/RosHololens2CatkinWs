@@ -49,12 +49,16 @@ public:
     void handleLongThrowPixelDirections(const hololens_point_cloud_msgs::PixelDirections::ConstPtr& msg);
 
     // Callbacks for post processing the point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr doPostProcessing();
     void smoothenPointCloud();
     void detectPlanes();
 
     // Callbacks for clearing and saving the point cloud.
     void clearPointCloud();
     void savePointCloud();
+
+    // Methods for accessing the spatial map.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr getSpatialMap(bool performPostProcessing);
 
 private:
     // Handles the arrival of a new depth frame.
@@ -101,6 +105,9 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace,
         Eigen::Matrix4f camToWorld);
 
+    // Smoothes the given cloud using moving least squares.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr smoothenPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+
     // Estimates the normals for the given point cloud.
     pcl::PointCloud<pcl::Normal>::Ptr estimateNormals(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToEstimateNormalsFor,
@@ -121,6 +128,9 @@ private:
         const pcl::PointCloud<pcl::PointXYZ>::Ptr cloudToCluster,
         const pcl::PointCloud<pcl::Normal>::Ptr cloudNormals,
         const double clusterTolerance);
+
+    // Detects planes in the given cloud and projects all found inliers onto the corresponding plane.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr detectPlanes(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
 
     // Detects planes in the given input cloud and clusters the cloud into planes and remainder.
     int detectPlanes(

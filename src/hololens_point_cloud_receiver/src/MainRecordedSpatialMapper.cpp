@@ -12,6 +12,7 @@ int main(int argc, char **argv)
     ros::Subscriber savePointCloudSubscriber = n.subscribe(SAVE_POINT_CLOUD_TOPIC, 10, savePointCloudCallback);
     ros::Subscriber smoothenPointCloudSubscriber = n.subscribe(SMOOTHEN_POINT_CLOUD_TOPIC, 10, smoothenPointCloudCallback);
     ros::Subscriber findPlanesSubscriber = n.subscribe(FIND_PLANES_TOPIC, 10, findPlanesCallback);
+    ros::ServiceServer getSpatialMapService = n.advertiseService(GET_SPATIAL_MAP_SERVICE, getSpatialMapCallback);
 
     spatialMapper = new SpatialMapper(n);
     SpatialMapper* mappers[] = {spatialMapper};
@@ -51,4 +52,17 @@ void smoothenPointCloudCallback(const std_msgs::Bool::ConstPtr& msg)
 void findPlanesCallback(const std_msgs::Bool::ConstPtr& msg)
 {
     spatialMapper->detectPlanes();
+}
+
+bool getSpatialMapCallback(
+    hololens_point_cloud_receiver::get_spatial_map::Request &req,
+    hololens_point_cloud_receiver::get_spatial_map::Response &res)
+{
+    sensor_msgs::PointCloud2 spatialMap;
+    pcl::toROSMsg(*spatialMapper->getSpatialMap(req.doPostProcessing), spatialMap);
+    spatialMap.header.seq = 1;
+    spatialMap.header.stamp = ros::Time::now();
+    spatialMap.header.frame_id = "map";
+    res.spatialMap = spatialMap;
+    return true;
 }

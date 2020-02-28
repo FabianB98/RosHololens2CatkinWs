@@ -18,3 +18,5 @@
 
 #define RECORD_TOPIC "/recordDepthFrames"
 #define LOAD_RECORDING_TOPIC "/loadRecording"
+
+#define GET_SPATIAL_MAP_SERVICE "/getSpatialMap"
