@@ -319,7 +319,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::computePointCloudFromDepthMap
 
         // Calculate the point for the current pixel based on the pixels depth value.
         pointCloudCamSpace->push_back(
-                pcl::PointXYZ(-dir.direction.x * depth, -dir.direction.y * depth, -dir.direction.z * depth));
+                pcl::PointXYZ(dir.direction.x * depth, dir.direction.y * depth, dir.direction.z * depth));
     }
 
     // Return the calculated point cloud.
