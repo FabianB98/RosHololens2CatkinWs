@@ -1,0 +1,33 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Configuration file for the HoloLens 2.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
+useShortThrow: false
+useLongThrow: true
+
+# Hyper parameters used for downsampling.
+doDownsampling: false
+downsamplingLeafSize: 0.01
+
+# Hyper parameters used for outlier removal with a radius outlier removal filer.
+doOutlierRemovalRadius: false
+outlierRemovalRadiusSearch: 0.05
+outlierRemovalMinNeighborsInRadius: 9
+
+# Hyper parameters used for outlier removal with a statistical outlier removal filter.
+doOutlierRemovalStatistical: false
+outlierRemovalNeighborsToCheck: 10
+outlierRemovalStdDeviationMultiplier: 0.5
+
+# Sensor intrinsics of the short throw depth sensor.
+shortThrowMinDepth: 0.2
+shortThrowMinReliableDepth: 0.2
+shortThrowMaxReliableDepth: 1.0
+shortThrowMaxDepth: 1.0
+
+# Sensor intrinsics of the long throw depth sensor.
+longThrowMinDepth: 0.1
+longThrowMinReliableDepth: 0.1
+longThrowMaxReliableDepth: 16.0
+longThrowMaxDepth: 16.0

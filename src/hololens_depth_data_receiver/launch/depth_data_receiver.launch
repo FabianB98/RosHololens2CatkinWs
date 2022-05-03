@@ -1,0 +1,6 @@
+<launch>
+    <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+
+    <rosparam file="$(find hololens_depth_data_receiver)/config/hololens2.yaml"/>
+    <node name="depth_data_receiver" pkg="hololens_depth_data_receiver" type="depth_data_receiver"/>
+</launch>

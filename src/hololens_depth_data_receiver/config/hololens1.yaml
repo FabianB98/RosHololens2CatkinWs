@@ -1,0 +1,33 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Configuration file for the HoloLens (1st gen).
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
+useShortThrow: false
+useLongThrow: true
+
+# Hyper parameters used for downsampling.
+doDownsampling: true
+downsamplingLeafSize: 0.01
+
+# Hyper parameters used for outlier removal with a radius outlier removal filer.
+doOutlierRemovalRadius: true
+outlierRemovalRadiusSearch: 0.05
+outlierRemovalMinNeighborsInRadius: 9
+
+# Hyper parameters used for outlier removal with a statistical outlier removal filter.
+doOutlierRemovalStatistical: false
+outlierRemovalNeighborsToCheck: 10
+outlierRemovalStdDeviationMultiplier: 0.5
+
+# Sensor intrinsics of the short throw depth sensor.
+shortThrowMinDepth: 0.2
+shortThrowMinReliableDepth: 0.2
+shortThrowMaxReliableDepth: 1.0
+shortThrowMaxDepth: 1.0
+
+# Sensor intrinsics of the long throw depth sensor.
+longThrowMinDepth: 0.5
+longThrowMinReliableDepth: 1.0   # Values below 1 meter are also reliable, but this value was chosen such that the wearer's arms won't accidentally be added to the point cloud.
+longThrowMaxReliableDepth: 3.3
+longThrowMaxDepth: 4.0

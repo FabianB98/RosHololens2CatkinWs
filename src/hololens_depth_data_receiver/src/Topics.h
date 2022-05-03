@@ -1,0 +1,16 @@
+#define SHORT_THROW_PIXEL_DIRECTIONS_TOPIC "/hololensShortThrowPixelDirections"
+#define LONG_THROW_PIXEL_DIRECTIONS_TOPIC "/hololensLongThrowPixelDirections"
+
+#define SHORT_THROW_DEPTH_TOPIC "/hololensShortThrowDepth"
+#define LONG_THROW_DEPTH_TOPIC "/hololensLongThrowDepth"
+
+#define SHORT_THROW_IMAGE_TOPIC "hololensShortThrowImage"
+#define LONG_THROW_IMAGE_TOPIC "hololensLongThrowImage"
+
+#define SHORT_THROW_POINT_CLOUD_CAM_SPACE "hololensShortThrowPointCloudCamSpace"
+#define LONG_THROW_POINT_CLOUD_CAM_SPACE "hololensLongThrowPointCloudCamSpace"
+
+#define SHORT_THROW_POINT_CLOUD_WORLD_SPACE "hololensShortThrowPointCloudWorldSpace"
+#define LONG_THROW_POINT_CLOUD_WORLD_SPACE "hololensLongThrowPointCloudWorldSpace"
+
+#define HOLOLENS_POSITION_TOPIC "hololensPosition"

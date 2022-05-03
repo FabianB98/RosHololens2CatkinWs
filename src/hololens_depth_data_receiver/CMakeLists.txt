@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(hololens_point_cloud_msgs)
+project(hololens_depth_data_receiver)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -std=c++0x -fopenmp -fPIC")
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -8,9 +10,15 @@ project(hololens_point_cloud_msgs)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  rosbridge_server
+  hololens_msgs
   roscpp
   rospy
   std_msgs
+  geometry_msgs
+  pcl_conversions
+  pcl_ros
+  tf
   message_generation
 )
 
@@ -48,22 +56,15 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
-add_message_files(
-  FILES
-  DepthFrame.msg
-  Matrix.msg
-  PixelDirection.msg
-  PixelDirections.msg
-  Point.msg
-  PointCloud.msg
-  Quaternion.msg
-)
+# add_message_files(
+#   FILES
+#   Message1.msg
+#   Message2.msg
+# )
 
 ## Generate services in the 'srv' folder
 # add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
+#  FILES
 # )
 
 ## Generate actions in the 'action' folder
@@ -73,10 +74,11 @@ add_message_files(
 #   Action2.action
 # )
 
-# Generate added messages and services with any dependencies listed here
+## Generate added messages and services with any dependencies listed here
 generate_messages(
   DEPENDENCIES
   std_msgs
+  sensor_msgs
 )
 
 ################################################
@@ -110,10 +112,9 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES hololens_point_cloud_msgs
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+#  LIBRARIES hololens_depth_data_receiver
+#  CATKIN_DEPENDS rosbridge_server roscpp rospy std_msgs
 #  DEPENDS system_lib
-CATKIN_DEPENDS message_runtime
 )
 
 ###########
@@ -129,7 +130,7 @@ include_directories(
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/hololens_point_cloud_msgs.cpp
+#   src/${PROJECT_NAME}/hololens_depth_data_receiver.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -140,7 +141,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/hololens_point_cloud_msgs_node.cpp)
+# add_executable(${PROJECT_NAME}_node src/hololens_depth_data_receiver_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -157,6 +158,8 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
+add_executable(depth_data_receiver src/Main.cpp src/DepthDataReceiver.cpp src/DepthMap.cpp src/Base64.cpp)
+target_link_libraries(depth_data_receiver ${catkin_LIBRARIES})
 #############
 ## Install ##
 #############
@@ -197,7 +200,7 @@ include_directories(
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_hololens_point_cloud_msgs.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_hololens_depth_data_receiver.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
