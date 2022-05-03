@@ -50,6 +50,11 @@ public:
     void handleLongThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg);
 
 private:
+    // Handles the arrival of a new pixel directions message.
+    void handlePixelDirections(
+        const hololens_msgs::PixelDirections::ConstPtr& pixelDirectionsMsg,
+        hololens_msgs::PixelDirections::Ptr* pixelDirectionsTarget);
+
     // Handles the arrival of a new depth frame.
     void handleDepthFrame(
         const hololens_msgs::DepthFrame::ConstPtr& depthFrame, 
@@ -100,7 +105,8 @@ private:
     void publishHololensPosition(const hololens_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishHololensCamToWorldTf(const hololens_msgs::DepthFrame::ConstPtr& depthFrame);
     void publishDepthImage(
-        const DepthMap depthMap, 
+        const DepthMap depthMap,
+        const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
         const ros::Publisher& publisher, 
         uint32_t sequenceNumber,
         const float minDepth,
@@ -138,9 +144,24 @@ private:
     float longThrowMaxReliableDepth;
     float longThrowMaxDepth;
 
+    // Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region
+    // of interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
+    bool discardNoisyPixelsRect;
+    float noisyPixelRemovalRectCenterX;
+    float noisyPixelRemovalRectCenterY;
+    float noisyPixelRemovalRectWidth;
+    float noisyPixelRemovalRectHeight;
+
+    // Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
+    // interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
+    bool discardNoisyPixelsCircle;
+    float noisyPixelRemovalCircleCenterX;
+    float noisyPixelRemovalCircleCenterY;
+    float noisyPixelRemovalCircleRadius;
+
     // The directions (in camera space) in which each pixel of the depth frames points at.
-    hololens_msgs::PixelDirections::ConstPtr shortThrowDirections;
-    hololens_msgs::PixelDirections::ConstPtr longThrowDirections;
+    hololens_msgs::PixelDirections::Ptr shortThrowDirections;
+    hololens_msgs::PixelDirections::Ptr longThrowDirections;
 
     // ROS publishers.
     ros::Publisher shortThrowImagePublisher;

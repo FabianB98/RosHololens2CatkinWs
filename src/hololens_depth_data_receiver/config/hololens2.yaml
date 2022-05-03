@@ -31,3 +31,20 @@ longThrowMinDepth: 0.1
 longThrowMinReliableDepth: 0.1
 longThrowMaxReliableDepth: 16.0
 longThrowMaxDepth: 16.0
+
+# Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region of
+# interst. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame. Positions and
+# sizes are relative positions and sizes in the depth sensor's image space.
+discardNoisyPixelsRect: true
+noisyPixelRemovalRectCenterX: 0.5
+noisyPixelRemovalRectCenterY: 0.5
+noisyPixelRemovalRectWidth: 0.9
+noisyPixelRemovalRectHeight: 0.9
+
+# Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
+# interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame. Positions and
+# sizes are relative positions and sizes in the depth sensor's image space.
+discardNoisyPixelsCircle: true
+noisyPixelRemovalCircleCenterX: 0.5
+noisyPixelRemovalCircleCenterY: 0.5
+noisyPixelRemovalCircleRadius: 0.45

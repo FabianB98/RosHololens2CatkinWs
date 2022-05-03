@@ -79,6 +79,27 @@
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
+//                      SWITCHES AND DEFAULT HYPER PARAMETERS RELATED TO REMOVAL OF NOISY PIXELS                      //
+//                                                                                                                    //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region of
+// interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
+#define DISCARD_NOISY_PIXELS_RECT false
+#define NOISY_PIXEL_REMOVAL_RECT_CENTER_X 0.5f
+#define NOISY_PIXEL_REMOVAL_RECT_CENTER_Y 0.5f
+#define NOISY_PIXEL_REMOVAL_RECT_WIDTH 1.0f
+#define NOISY_PIXEL_REMOVAL_RECT_HEIGHT 1.0f
+
+// Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
+// interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
+#define DISCARD_NOISY_PIXELS_CIRCLE false
+#define NOISY_PIXEL_REMOVAL_CIRCLE_CENTER_X 0.5f
+#define NOISY_PIXEL_REMOVAL_CIRCLE_CENTER_Y 0.5f
+#define NOISY_PIXEL_REMOVAL_CIRCLE_RADIUS 1.0f
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+//                                                                                                                    //
 //                                              ACTUAL CODE STARTS HERE                                               //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -119,6 +140,18 @@ DepthDataReceiver::DepthDataReceiver(
     n.param("longThrowMaxReliableDepth", longThrowMaxReliableDepth, LONG_THROW_MAX_RELIABLE_DEPTH);
     n.param("longThrowMaxDepth", longThrowMaxDepth, LONG_THROW_MAX_DEPTH);
 
+    // Initialize all switches and sensor intrinsics related to removal of noisy pixels as specified by parameters (or
+    // their default value).
+    n.param("discardNoisyPixelsRect", discardNoisyPixelsRect, DISCARD_NOISY_PIXELS_RECT);
+    n.param("noisyPixelRemovalRectCenterX", noisyPixelRemovalRectCenterX, NOISY_PIXEL_REMOVAL_RECT_CENTER_X);
+    n.param("noisyPixelRemovalRectCenterY", noisyPixelRemovalRectCenterY, NOISY_PIXEL_REMOVAL_RECT_CENTER_Y);
+    n.param("noisyPixelRemovalRectWidth", noisyPixelRemovalRectWidth, NOISY_PIXEL_REMOVAL_RECT_WIDTH);
+    n.param("noisyPixelRemovalRectHeight", noisyPixelRemovalRectHeight, NOISY_PIXEL_REMOVAL_RECT_HEIGHT);
+    n.param("discardNoisyPixelsCircle", discardNoisyPixelsCircle, DISCARD_NOISY_PIXELS_CIRCLE);
+    n.param("noisyPixelRemovalCircleCenterX", noisyPixelRemovalCircleCenterX, NOISY_PIXEL_REMOVAL_CIRCLE_CENTER_X);
+    n.param("noisyPixelRemovalCircleCenterY", noisyPixelRemovalCircleCenterY, NOISY_PIXEL_REMOVAL_CIRCLE_CENTER_Y);
+    n.param("noisyPixelRemovalCircleRadius", noisyPixelRemovalCircleRadius, NOISY_PIXEL_REMOVAL_CIRCLE_RADIUS);
+
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(shortThrowImageTopic, 10);
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
@@ -152,13 +185,78 @@ void DepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::DepthFram
 void DepthDataReceiver::handleShortThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg)
 {
     ROS_INFO("Received %zu short throw pixel directions!", msg->pixelDirections.size());
-    shortThrowDirections = msg;
+    handlePixelDirections(msg, &shortThrowDirections);
 }
 
 void DepthDataReceiver::handleLongThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg)
 {
     ROS_INFO("Received %zu long throw pixel directions!", msg->pixelDirections.size());
-    longThrowDirections = msg;
+    handlePixelDirections(msg, &longThrowDirections);
+}
+
+void DepthDataReceiver::handlePixelDirections(
+    const hololens_msgs::PixelDirections::ConstPtr& pixelDirectionsMsg,
+    hololens_msgs::PixelDirections::Ptr* pixelDirectionsTarget)
+{
+    // Note: From a software engineering perspective it would be better to actually have two separate methods for
+    // applying the rectangular filter and the circular filter. However, it was chosen to apply both filters in the same
+    // method due to the fact that some calculations can be shared between both filters, so there is some performance
+    // benefit of applying both filters in the same method.
+
+    // Determine the size of the region for which we got pixel directions.
+    uint32_t min_u = pixelDirectionsMsg->pixelDirections.at(0).u;
+    uint32_t max_u = pixelDirectionsMsg->pixelDirections.at(0).u;
+    uint32_t min_v = pixelDirectionsMsg->pixelDirections.at(0).v;
+    uint32_t max_v = pixelDirectionsMsg->pixelDirections.at(0).v;
+
+    for (uint32_t i = 0; i < pixelDirectionsMsg->pixelDirections.size(); ++i)
+    {
+        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections.at(i);
+        if (dir.u < min_u) min_u = dir.u;
+        if (dir.u > max_u) max_u = dir.u;
+        if (dir.v < min_v) min_v = dir.v;
+        if (dir.v > max_v) max_v = dir.v;
+    }
+
+    float width = static_cast<float>(max_u - min_u);
+    float height = static_cast<float>(max_v - min_v);
+
+    // Calculate the coordinates of the rectangle's edges.
+    float rectUMinRelative = noisyPixelRemovalRectCenterX - 0.5f * noisyPixelRemovalRectWidth;
+    float rectUMaxRelative = noisyPixelRemovalRectCenterX + 0.5f * noisyPixelRemovalRectWidth;
+    float rectVMinRelative = noisyPixelRemovalRectCenterY - 0.5f * noisyPixelRemovalRectHeight;
+    float rectVMaxRelative = noisyPixelRemovalRectCenterY + 0.5f * noisyPixelRemovalRectHeight;
+
+    uint32_t rectUMin = min_u + static_cast<uint32_t>(roundf(rectUMinRelative * width));
+    uint32_t rectUMax = min_u + static_cast<uint32_t>(roundf(rectUMaxRelative * width));
+    uint32_t rectVMin = min_v + static_cast<uint32_t>(roundf(rectVMinRelative * height));
+    uint32_t rectVMax = min_v + static_cast<uint32_t>(roundf(rectVMaxRelative * height));
+
+    // Calculate the coordinates of the circle's center point and its radius.
+    uint32_t circleCenterU = min_u + static_cast<uint32_t>(roundf(noisyPixelRemovalCircleCenterX * width));
+    uint32_t circleCenterV = min_v + static_cast<uint32_t>(roundf(noisyPixelRemovalCircleCenterY * height));
+    float circleRadius = noisyPixelRemovalCircleRadius * std::max(width, height);
+    float circleRadiusSquared = circleRadius * circleRadius;
+
+    // Check for each pixel direction whether the corresponding pixel is inside the rectangle and the circle.
+    hololens_msgs::PixelDirections::Ptr filteredPixelDirections = hololens_msgs::PixelDirections::Ptr(new hololens_msgs::PixelDirections());
+    for (uint32_t i = 0; i < pixelDirectionsMsg->pixelDirections.size(); ++i)
+    {
+        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections.at(i);
+
+        bool insideRect = !discardNoisyPixelsRect 
+            || (rectUMin <= dir.u && dir.u <= rectUMax && rectVMin <= dir.v && dir.v <= rectVMax);
+        bool insideCircle = !discardNoisyPixelsCircle 
+            || ((dir.u - circleCenterU) * (dir.u - circleCenterU) + (dir.v - circleCenterV) * (dir.v - circleCenterV) <= circleRadiusSquared);
+
+        if (insideRect && insideCircle)
+        {
+            filteredPixelDirections->pixelDirections.push_back(dir);
+        }
+    }
+    ROS_INFO("There are %zu pixel directions after filtering.", filteredPixelDirections->pixelDirections.size());
+
+    *pixelDirectionsTarget = filteredPixelDirections;
 }
 
 void DepthDataReceiver::handleDepthFrame(
@@ -205,7 +303,8 @@ void DepthDataReceiver::handleDepthFrame(
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     publishHololensPosition(depthFrame);
     publishHololensCamToWorldTf(depthFrame);
-    publishDepthImage(depthMap, imagePublisher, *sequenceNumber, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, minDepth, minReliableDepth,
+            maxReliableDepth, maxDepth);
     publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, "hololens_cam");
     publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, "hololens_world");
     sequenceNumber++;
@@ -378,7 +477,8 @@ void DepthDataReceiver::publishHololensCamToWorldTf(const hololens_msgs::DepthFr
 }
 
 void DepthDataReceiver::publishDepthImage(
-    const DepthMap depthMap, 
+    const DepthMap depthMap,
+    const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
     const ros::Publisher& publisher, 
     uint32_t sequenceNumber,
     const float minDepth,
@@ -401,11 +501,25 @@ void DepthDataReceiver::publishDepthImage(
     image.is_bigendian = 0;
     image.step = depthMap.width * 3;
 
-    // Brighten the image, color all unreliable pixels and add the image it to the message.
+    // Initialize the image to be completely black.
+    image.data.resize(image.height * image.width * 3, 0);
+
+    // Mark all pixels which have a corresponding pixel direction as red.
+    for (uint32_t i = 0; i < pixelDirections->pixelDirections.size(); ++i)
+    {
+        hololens_msgs::PixelDirection dir = pixelDirections->pixelDirections.at(i);
+        uint32_t index = (dir.u * image.width + dir.v) * 3;
+        image.data.at(index) = 255;
+    }
+
+    // Brighten the image and color all unreliable pixels.
     for (uint32_t v = 0; v < image.height; ++v)
     {
         for (uint32_t u = 0; u < image.width; ++u)
         {
+            uint32_t index = (v * image.width + u) * 3;
+            bool hasNoPixelDirection = image.data.at(index) == 0;
+
             // Get the depth of the current pixel.
             uint32_t pixelValue = depthMap.valueAt(u, v);
             float depth = static_cast<float>(pixelValue) / 1000.0f;
@@ -417,30 +531,37 @@ void DepthDataReceiver::publishDepthImage(
             if (depth < minDepth || depth > maxDepth)
             {
                 // Depth is outside the depth range. Color the current pixel black.
-                image.data.push_back(0);
-                image.data.push_back(0);
-                image.data.push_back(0);
+                image.data.at(index) = 0;
+                image.data.at(index + 1) = 0;
+                image.data.at(index + 2) = 0;
+            }
+            else if (hasNoPixelDirection)
+            {
+                // Pixel doesn't have any pixel direction associated with it. Color it blue.
+                image.data.at(index) = 0;
+                image.data.at(index + 1) = 0;
+                image.data.at(index + 2) = greyscaleValue;
             }
             else if (depth < minReliableDepth)
             {
                 // Depth too small to be considered as reliable. Color the current pixel purple.
-                image.data.push_back(greyscaleValue * 3);
-                image.data.push_back(0);
-                image.data.push_back(greyscaleValue * 3);
+                image.data.at(index) = greyscaleValue * 3;
+                image.data.at(index + 1) = 0;
+                image.data.at(index + 2) = greyscaleValue * 3;
             }
             else if (depth > maxReliableDepth)
             {
                 // Depth is too high to be considered as reliable. Color the current pixel red.
-                image.data.push_back(greyscaleValue);
-                image.data.push_back(0);
-                image.data.push_back(0);
+                image.data.at(index) = greyscaleValue;
+                image.data.at(index + 1) = 0;
+                image.data.at(index + 2) = 0;
             }
             else
             {
                 // Depth is inside the reliable depth range. Color the current pixel grey.
-                image.data.push_back(greyscaleValue);
-                image.data.push_back(greyscaleValue);
-                image.data.push_back(greyscaleValue);
+                image.data.at(index) = greyscaleValue;
+                image.data.at(index + 1) = greyscaleValue;
+                image.data.at(index + 2) = greyscaleValue;
             }
         }
     }
