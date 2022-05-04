@@ -68,6 +68,9 @@ private:
         const ros::Publisher& pointCloudWorldSpacePublisher,
         uint32_t* sequenceNumber);
 
+    // Applies a median filter onto a given depth map.
+    void applyMedianFilter(DepthMap& depthMap);
+
     // Computes a point cloud (in camera space) from a given depth map.
     pcl::PointCloud<pcl::PointXYZ>::Ptr computePointCloudFromDepthMap(
         const DepthMap depthMap, 
@@ -119,9 +122,13 @@ private:
     bool useLongThrow;
 
     // Switches indicating which filter algorithms should be executed.
+    bool doMedianFiltering;
     bool doDownsampling;
     bool doOutlierRemovalRadius;
     bool doOutlierRemovalStatistical;
+
+    // Hyper parameters used for median filtering.
+    int medianFilterWindowSize;
 
     // Hyper parameters used for downsampling.
     float downsamplingLeafSize;

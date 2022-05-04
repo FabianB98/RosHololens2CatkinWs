@@ -6,14 +6,18 @@
 useShortThrow: false
 useLongThrow: true
 
+# Hyper parameters used for median filtering.
+doMedianFiltering: true
+medianFilterWindowSize: 5
+
 # Hyper parameters used for downsampling.
-doDownsampling: false
+doDownsampling: true
 downsamplingLeafSize: 0.01
 
 # Hyper parameters used for outlier removal with a radius outlier removal filer.
-doOutlierRemovalRadius: false
+doOutlierRemovalRadius: true
 outlierRemovalRadiusSearch: 0.05
-outlierRemovalMinNeighborsInRadius: 9
+outlierRemovalMinNeighborsInRadius: 15
 
 # Hyper parameters used for outlier removal with a statistical outlier removal filter.
 doOutlierRemovalStatistical: false
@@ -21,15 +25,15 @@ outlierRemovalNeighborsToCheck: 10
 outlierRemovalStdDeviationMultiplier: 0.5
 
 # Sensor intrinsics of the short throw depth sensor.
-shortThrowMinDepth: 0.2
+shortThrowMinDepth: 0.1
 shortThrowMinReliableDepth: 0.2
 shortThrowMaxReliableDepth: 1.0
 shortThrowMaxDepth: 1.0
 
 # Sensor intrinsics of the long throw depth sensor.
 longThrowMinDepth: 0.1
-longThrowMinReliableDepth: 0.1
-longThrowMaxReliableDepth: 16.0
+longThrowMinReliableDepth: 0.75   # While the sensor generally seems to provide reliable values even for values below 0.75 meters, there are sometimes a lot of ghost points in that range.
+longThrowMaxReliableDepth: 12.0
 longThrowMaxDepth: 16.0
 
 # Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region of
@@ -38,8 +42,8 @@ longThrowMaxDepth: 16.0
 discardNoisyPixelsRect: true
 noisyPixelRemovalRectCenterX: 0.5
 noisyPixelRemovalRectCenterY: 0.5
-noisyPixelRemovalRectWidth: 0.9
-noisyPixelRemovalRectHeight: 0.9
+noisyPixelRemovalRectWidth: 0.8
+noisyPixelRemovalRectHeight: 0.8
 
 # Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
 # interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame. Positions and

@@ -5,6 +5,7 @@
 #include <pcl/common/transforms.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/filters/median_filter.h>
 #include <pcl/filters/project_inliers.h>
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -35,6 +36,8 @@
 #define USE_LONG_THROW true
 
 // Switches indicating which filter algorithms should be executed.
+// Should a median filter be applied on the raw depth map?
+#define MEDIAN_FILTER_DEPTH_MAP false
 // Should new point clouds (i.e. non-registered point clouds calculated from the depth frames) be downsampled?
 #define DOWNSAMPLE_NEW_CLOUD true
 // Should outliers be removed from new point clouds with a radius outlier removal filter?
@@ -47,6 +50,9 @@
 //                                  DEFAULT HYPER PARAMETERS FOR THE USED ALGORITHMS                                  //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Parameters for the median filter used for removing outliers.
+#define MEDIAN_FILTER_WINDOW_SIZE 3     // The kernel size of the filter. A value of 3 corresponds to a 3x3 kernel.
 
 // Parameters for the voxel grid filter used for downsampling.
 #define DOWNSAMPLING_LEAF_SIZE 0.01f    // At most one point allowed in a voxel within this edge length.
@@ -119,11 +125,13 @@ DepthDataReceiver::DepthDataReceiver(
     // Initialize all switches as specified by parameters (or their default value).
     n.param("useShortThrow", useShortThrow, USE_SHORT_THROW);
     n.param("useLongThrow", useLongThrow, USE_LONG_THROW);
+    n.param("doMedianFiltering", doMedianFiltering, MEDIAN_FILTER_DEPTH_MAP);
     n.param("doDownsampling", doDownsampling, DOWNSAMPLE_NEW_CLOUD);
     n.param("doOutlierRemovalRadius", doOutlierRemovalRadius, REMOVE_OUTLIERS_RADIUS);
     n.param("doOutlierRemovalStatistical", doOutlierRemovalStatistical, REMOVE_OUTLIERS_STATISTICAL);
 
     // Initialize all hyper parameters as specified by parameters (or their default value).
+    n.param("medianFilterWindowSize", medianFilterWindowSize, MEDIAN_FILTER_WINDOW_SIZE);
     n.param("downsamplingLeafSize", downsamplingLeafSize, DOWNSAMPLING_LEAF_SIZE);
     n.param("outlierRemovalRadiusSearch", outlierRemovalRadiusSearch, OUTLIER_REMOVAL_RADIUS_SEARCH);
     n.param("outlierRemovalMinNeighborsInRadius", outlierRemovalMinNeighborsInRadius, OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS);
@@ -276,6 +284,11 @@ void DepthDataReceiver::handleDepthFrame(
     DepthMap depthMap = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight, 
             depthFrame->depthMapPixelStride, false);
 
+    // Apply a median filter onto the depth map to remove outliers (extremely noisy values distributed as "salt and
+    // pepper noise") and to change these outliers to a reasonable value.
+    if (doMedianFiltering)
+        applyMedianFilter(depthMap);
+
     // Calculate the point cloud (in camera space).
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = computePointCloudFromDepthMap(depthMap, pixelDirections,
             minReliableDepth, maxReliableDepth);
@@ -308,6 +321,43 @@ void DepthDataReceiver::handleDepthFrame(
     publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, "hololens_cam");
     publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, "hololens_world");
     sequenceNumber++;
+}
+
+void DepthDataReceiver::applyMedianFilter(DepthMap& depthMap)
+{
+    // Convert the depth map to an organized point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr depthMapCloud (new pcl::PointCloud<pcl::PointXYZ>());
+    depthMapCloud->width = depthMap.width;
+    depthMapCloud->height = depthMap.height;
+    depthMapCloud->is_dense = false;
+    depthMapCloud->points.resize(depthMap.width * depthMap.height);
+
+    for (uint32_t u = 0; u < depthMap.width; u++)
+    {
+        for (uint32_t v = 0; v < depthMap.height; v++)
+        {
+            depthMapCloud->at(u, v).x = static_cast<float>(u);
+            depthMapCloud->at(u, v).y = static_cast<float>(v);
+            depthMapCloud->at(u, v).z = static_cast<float>(depthMap.valueAt(u, v));
+        }
+    }
+
+    // Apply a median filter over the organized point cloud.
+    pcl::PointCloud<pcl::PointXYZ> depthMapCloudFiltered;
+    pcl::MedianFilter<pcl::PointXYZ> medianFilter;
+    medianFilter.setWindowSize(medianFilterWindowSize);
+    medianFilter.setInputCloud(depthMapCloud);
+    medianFilter.applyFilter(depthMapCloudFiltered);
+
+    // Convert the filtered organized point cloud back into a depth map.
+    for (uint32_t u = 0; u < depthMap.width; u++)
+    {
+        for (uint32_t v = 0; v < depthMap.height; v++) 
+        {
+            uint32_t filteredDepth = static_cast<uint32_t>(roundf(depthMapCloudFiltered.at(u, v).z));
+            depthMap.setValueAt(u, v, filteredDepth);
+        }
+    }
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::computePointCloudFromDepthMap(

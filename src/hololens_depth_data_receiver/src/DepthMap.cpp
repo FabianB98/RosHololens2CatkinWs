@@ -39,3 +39,65 @@ uint32_t DepthMap::valueAt(uint32_t u, uint32_t v) const
             return data[index] | (data[index + 1] << 8) | (data[index + 2] << 16) | (data[index + 3] << 24);
     }
 }
+
+
+void DepthMap::setValueAt(uint32_t u, uint32_t v, uint32_t value)
+{
+    // Calculate the index where the value for the given pixel should be stored in the data array.
+    uint32_t index = (u + v * width) * pixelStride;
+
+    if (bigEndian)
+    {
+        // Data is stored in big endian order, i.e. the smallest index will contain the highest byte.
+        // Store the pixel value accordingly (depending on the amount of bytes per pixel).
+        if (pixelStride == 1)
+        {
+            data[index] = static_cast<uint8_t>(value);
+        }
+        else if (pixelStride == 2)
+        {
+            data[index] = static_cast<uint8_t>(value >> 8);
+            data[index + 1] = static_cast<uint8_t>(value);
+        }
+        else if (pixelStride == 3)
+        {
+            data[index] = static_cast<uint8_t>(value >> 16);
+            data[index + 1] = static_cast<uint8_t>(value >> 8);
+            data[index + 2] = static_cast<uint8_t>(value);
+        }
+        else
+        {
+            data[index] = static_cast<uint8_t>(value >> 24);
+            data[index + 1] = static_cast<uint8_t>(value >> 16);
+            data[index + 2] = static_cast<uint8_t>(value >> 8);
+            data[index + 3] = static_cast<uint8_t>(value);
+        }
+    }
+    else
+    {
+        // Data is stored in little endian order, i.e. the highest index will contain the highest byte.
+        // Store the pixel value accordingly (depending on the amount of bytes per pixel).
+        if (pixelStride == 1)
+        {
+            data[index] = static_cast<uint8_t>(value);
+        }
+        else if (pixelStride == 2)
+        {
+            data[index] = static_cast<uint8_t>(value);
+            data[index + 1] = static_cast<uint8_t>(value >> 8);
+        }
+        else if (pixelStride == 3)
+        {
+            data[index] = static_cast<uint8_t>(value);
+            data[index + 1] = static_cast<uint8_t>(value >> 8);
+            data[index + 2] = static_cast<uint8_t>(value >> 16);
+        }
+        else
+        {
+            data[index] = static_cast<uint8_t>(value);
+            data[index + 1] = static_cast<uint8_t>(value >> 8);
+            data[index + 2] = static_cast<uint8_t>(value >> 16);
+            data[index + 3] = static_cast<uint8_t>(value >> 24);
+        }
+    }
+}
