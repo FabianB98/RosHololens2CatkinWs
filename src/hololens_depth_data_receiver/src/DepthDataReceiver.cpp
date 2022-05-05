@@ -168,6 +168,10 @@ DepthDataReceiver::DepthDataReceiver(
     shortThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudWorldSpaceTopic, 10);
     longThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudWorldSpaceTopic, 10);
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(hololensPositionTopic, 10);
+
+    // Initialize the pixel directions to an empty array each.
+    shortThrowDirections = hololens_msgs::PixelDirections::Ptr(new hololens_msgs::PixelDirections());
+    longThrowDirections = hololens_msgs::PixelDirections::Ptr(new hololens_msgs::PixelDirections());
 }
 
 void DepthDataReceiver::handleShortThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg)
