@@ -65,45 +65,6 @@
     <string>Find planes</string>
    </property>
   </widget>
-  <widget class="QPushButton" name="record_button">
-   <property name="geometry">
-    <rect>
-     <x>10</x>
-     <y>10</y>
-     <width>200</width>
-     <height>30</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Record depth frames</string>
-   </property>
-  </widget>
-  <widget class="QTextEdit" name="recording_directory_input">
-   <property name="geometry">
-    <rect>
-     <x>10</x>
-     <y>120</y>
-     <width>310</width>
-     <height>32</height>
-    </rect>
-   </property>
-   <property name="placeholderText">
-    <string>Recording directory</string>
-   </property>
-  </widget>
-  <widget class="QPushButton" name="load_button">
-   <property name="geometry">
-    <rect>
-     <x>10</x>
-     <y>160</y>
-     <width>310</width>
-     <height>30</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Load recording</string>
-   </property>
-  </widget>
  </widget>
  <resources/>
  <connections/>

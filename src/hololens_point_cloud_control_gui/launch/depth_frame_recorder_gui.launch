@@ -1,3 +1,0 @@
-<launch>
-  <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find hololens_point_cloud_control_gui)/resource/depth_frame_recorder_gui.perspective" output="screen"/>
-</launch>

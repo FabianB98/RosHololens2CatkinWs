@@ -2,9 +2,9 @@
 
 import sys
 
-from hololens_point_cloud_control_gui.control_gui import ControlGuiPlugin
+from naive_spatial_mapper_control_gui.control_gui import ControlGuiPlugin
 from rqt_gui.main import Main
 
-plugin = 'hololens_point_cloud_control_gui'
+plugin = 'control_gui'
 main = Main(filename=plugin)
 sys.exit(main.main(standalone=plugin))

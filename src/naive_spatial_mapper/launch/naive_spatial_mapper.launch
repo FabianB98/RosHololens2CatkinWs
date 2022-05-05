@@ -1,0 +1,6 @@
+<launch>
+    <include file="$(find hololens_depth_data_receiver)/launch/depth_data_receiver.launch"/>
+
+    <rosparam file="$(find naive_spatial_mapper)/config/default_params.yaml"/>
+    <node name="naive_spatial_mapper" pkg="naive_spatial_mapper" type="naive_spatial_mapper"/>
+</launch>

@@ -1,0 +1,34 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Configuration file containing the default parameters for the naive spatial mapper.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Switches and hyper parameters used for downsampling.
+downsampleSpatialMap: true
+downsamplingLeafSize: 0.01
+
+# Switches and hyper parameters used for registration.
+useICP: false
+icpMaxIterations: 20
+icpTransformationEpsilon: 1.0e-12
+icpMaxCorrespondenceDistance: 0.1
+icpRansacOutlierRejectionThreshold: 0.001
+icpEuclideanFitnessEpsilon: 1.0
+
+# Hyper parameters used for smoothing the spatial map.
+mlsPolynomialOrder: 2
+mlsSearchRadius: 0.04
+mlsOutlierRadiusSearch: 0.03
+mlsOutlierMinNeighborsInRadius: 6
+
+# Hyper parameters used for normal estimation.
+normalEstimationSearchRadius: 0.07
+
+# Hyper parameters used for plane detection.
+planeDetectionEpsAngle: 1.0
+planeDetectionNormalDistanceWeight: 0.06
+planeDetectionDistanceThreshold: 0.04
+planeDetectionMaxRansacIterations: 1000
+planeDetectionMinInliersAbsolute: 10000
+planeDetectionMinInliersRelative: 0.02
+planeDetectionKeepClusterAbsolute: 10000
+planeDetectionKeepClusterRelative: 0.25

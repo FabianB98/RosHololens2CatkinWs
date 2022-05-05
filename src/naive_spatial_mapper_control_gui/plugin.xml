@@ -1,0 +1,20 @@
+<library path="src">
+  <class name="ControlGuiPlugin" type="naive_spatial_mapper_control_gui.control_gui.ControlGuiPlugin" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A GUI plugin to control basic actions of the naive_spatial_mapper package.
+    </description>
+    <qtgui>
+      <!-- optional grouping...
+      <group>
+        <label>Group</label>
+      </group>
+      <group>
+        <label>Subgroup</label>
+      </group>
+      -->
+      <label>Naive Spatial Mapper Control GUI</label>
+      <icon type="theme">system-help</icon>
+      <statustip>A GUI plugin to control basic actions of the naive_spatial_mapper package.</statustip>
+    </qtgui>
+  </class>
+</library>
