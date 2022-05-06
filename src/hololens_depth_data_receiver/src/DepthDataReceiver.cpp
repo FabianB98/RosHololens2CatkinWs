@@ -318,12 +318,13 @@ void DepthDataReceiver::handleDepthFrame(
     ROS_INFO("Current frame consists of %zu points.", pointCloudCamSpace->size());
 
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
-    publishHololensPosition(depthFrame);
-    publishHololensCamToWorldTf(depthFrame);
-    publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, minDepth, minReliableDepth,
+    ros::Time time = ros::Time::now();
+    publishHololensPosition(depthFrame, time);
+    publishHololensCamToWorldTf(depthFrame, time);
+    publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, time, minDepth, minReliableDepth,
             maxReliableDepth, maxDepth);
-    publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, "hololens_cam");
-    publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, "hololens_world");
+    publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, time, "hololens_cam");
+    publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, time, "hololens_world");
     sequenceNumber++;
 }
 
@@ -472,8 +473,12 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::removeOutliersStatistical
     return pointCloudFiltered;
 }
 
-void DepthDataReceiver::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, const ros::Publisher& publisher,
-    uint32_t sequenceNumber, const std::string frameId)
+void DepthDataReceiver::publishPointCloud(
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+    const ros::Publisher& publisher,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
 {
     // Create the ROS message for the point cloud and store the point cloud inside it.
     sensor_msgs::PointCloud2 pointCloudMessage;
@@ -481,21 +486,23 @@ void DepthDataReceiver::publishPointCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr cl
 
     // Set the header of the message.
     pointCloudMessage.header.seq = sequenceNumber;
-    pointCloudMessage.header.stamp = ros::Time::now();
+    pointCloudMessage.header.stamp = timestamp;
     pointCloudMessage.header.frame_id = frameId;
 
     // Publish the message.
     publisher.publish(pointCloudMessage);
 }
 
-void DepthDataReceiver::publishHololensPosition(const hololens_msgs::DepthFrame::ConstPtr& depthFrame)
+void DepthDataReceiver::publishHololensPosition(
+    const hololens_msgs::DepthFrame::ConstPtr& depthFrame,
+    const ros::Time& timestamp)
 {
     // Create the ROS message for the current position of the HoloLens.
     geometry_msgs::PointStamped hololensPosition;
 
     // Set the header of the message.
     hololensPosition.header.seq = positionSequenceNumber;
-    hololensPosition.header.stamp = ros::Time::now();
+    hololensPosition.header.stamp = timestamp;
     hololensPosition.header.frame_id = "hololens_world";
 
     // Add the position of the HoloLens to the message.
@@ -508,7 +515,9 @@ void DepthDataReceiver::publishHololensPosition(const hololens_msgs::DepthFrame:
     positionSequenceNumber++;
 }
 
-void DepthDataReceiver::publishHololensCamToWorldTf(const hololens_msgs::DepthFrame::ConstPtr& depthFrame)
+void DepthDataReceiver::publishHololensCamToWorldTf(
+    const hololens_msgs::DepthFrame::ConstPtr& depthFrame, 
+    const ros::Time& timestamp)
 {
     // Create the transform instance which will be published.
     tf::Transform transform;
@@ -527,7 +536,7 @@ void DepthDataReceiver::publishHololensCamToWorldTf(const hololens_msgs::DepthFr
         depthFrame->camToWorldRotation.w));
     
     // Publish the transform.
-    hololensCamPublisher.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "hololens_world", "hololens_cam"));
+    hololensCamPublisher.sendTransform(tf::StampedTransform(transform, timestamp, "hololens_world", "hololens_cam"));
 }
 
 void DepthDataReceiver::publishDepthImage(
@@ -535,6 +544,7 @@ void DepthDataReceiver::publishDepthImage(
     const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
     const ros::Publisher& publisher, 
     uint32_t sequenceNumber,
+    const ros::Time& timestamp,
     const float minDepth,
     const float minReliableDepth,
     const float maxReliableDepth,
@@ -545,7 +555,7 @@ void DepthDataReceiver::publishDepthImage(
 
     // Set the header of the image.
     image.header.seq = sequenceNumber;
-    image.header.stamp = ros::Time::now();
+    image.header.stamp = timestamp;
     image.header.frame_id = "hololens_cam";
 
     // Set the meta data (width, height, encoding, ...) of the image.

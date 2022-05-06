@@ -104,14 +104,16 @@ private:
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
         const ros::Publisher& publisher,
         uint32_t sequenceNumber,
+        const ros::Time& timestamp,
         const std::string frameId);
-    void publishHololensPosition(const hololens_msgs::DepthFrame::ConstPtr& depthFrame);
-    void publishHololensCamToWorldTf(const hololens_msgs::DepthFrame::ConstPtr& depthFrame);
+    void publishHololensPosition(const hololens_msgs::DepthFrame::ConstPtr& depthFrame, const ros::Time& timestamp);
+    void publishHololensCamToWorldTf(const hololens_msgs::DepthFrame::ConstPtr& depthFrame, const ros::Time& timestamp);
     void publishDepthImage(
         const DepthMap depthMap,
         const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
         const ros::Publisher& publisher, 
         uint32_t sequenceNumber,
+        const ros::Time& timestamp,
         const float minDepth,
         const float minReliableDepth,
         const float maxReliableDepth,
