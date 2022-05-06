@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find hololens_depth_data_receiver)/launch/depth_data_receiver.launch"/>
+
+    <node name="octomap_based_spatial_mapper" pkg="octomap_based_spatial_mapper" type="octomap_based_spatial_mapper"/>
+</launch>

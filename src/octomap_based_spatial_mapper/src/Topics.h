@@ -1,0 +1,2 @@
+#define SHORT_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC "hololensShortThrowPointCloudWorldSpace"
+#define LONG_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC "hololensLongThrowPointCloudWorldSpace"
