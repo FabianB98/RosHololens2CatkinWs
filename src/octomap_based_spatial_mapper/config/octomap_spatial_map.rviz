@@ -10,7 +10,8 @@ Panels:
         - /Point Cloud1
         - /Point Cloud1/Status1
         - /HoloLens Position1
-        - /OccupancyGrid1
+        - /Octomap Current Frame1
+        - /Octomap Static Objects1
       Splitter Ratio: 0.5
     Tree Height: 464
   - Class: rviz/Selection
@@ -31,7 +32,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: Point Cloud
+    SyncSource: ""
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -97,11 +98,23 @@ Visualization Manager:
       Value: true
     - Class: octomap_rviz_plugin/OccupancyGrid
       Enabled: true
-      Max. Height Display: inf
+      Max. Height Display: 3.40282347e+38
       Max. Octree Depth: 16
-      Min. Height Display: -inf
-      Name: OccupancyGrid
-      Octomap Topic: /octomap
+      Min. Height Display: -3.40282347e+38
+      Name: Octomap Current Frame
+      Octomap Topic: /octomapCurrentFrame
+      Queue Size: 5
+      Value: true
+      Voxel Alpha: 1
+      Voxel Coloring: Z-Axis
+      Voxel Rendering: Occupied Voxels
+    - Class: octomap_rviz_plugin/OccupancyGrid
+      Enabled: true
+      Max. Height Display: 3.40282347e+38
+      Max. Octree Depth: 16
+      Min. Height Display: -3.40282347e+38
+      Name: Octomap Static Objects
+      Octomap Topic: /octomapStaticObjects
       Queue Size: 5
       Value: true
       Voxel Alpha: 1
