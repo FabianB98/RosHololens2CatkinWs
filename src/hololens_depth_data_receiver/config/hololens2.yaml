@@ -8,7 +8,7 @@ useLongThrow: true
 
 # Hyper parameters used for median filtering.
 doMedianFiltering: true
-medianFilterWindowSize: 5
+medianFilterWindowSize: 3
 
 # Hyper parameters used for downsampling.
 doDownsampling: true
@@ -24,6 +24,11 @@ doOutlierRemovalStatistical: false
 outlierRemovalNeighborsToCheck: 10
 outlierRemovalStdDeviationMultiplier: 0.5
 
+# Hyper parameters uesd for outlier removal by clustering and discarding too small clusters.
+doOutlierRemovalClustering: true
+outlierRemovalClusterTolerance: 0.08
+outlierRemovalMinClusterSize: 600
+
 # Sensor intrinsics of the short throw depth sensor.
 shortThrowMinDepth: 0.1
 shortThrowMinReliableDepth: 0.2
@@ -32,7 +37,7 @@ shortThrowMaxDepth: 1.0
 
 # Sensor intrinsics of the long throw depth sensor.
 longThrowMinDepth: 0.1
-longThrowMinReliableDepth: 0.75   # While the sensor generally seems to provide reliable values even for values below 0.75 meters, there are sometimes a lot of ghost points in that range.
+longThrowMinReliableDepth: 0.75 # While the sensor generally seems to provide reliable values even for values below 0.75 meters, there are sometimes a lot of ghost points in that range.
 longThrowMaxReliableDepth: 12.0
 longThrowMaxDepth: 16.0
 

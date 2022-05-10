@@ -99,6 +99,12 @@ private:
         const float numNeighborsToCheck,
         const float standardDeviationMultiplier);
 
+    // Removes outliers from a given point cloud by clustering the points and discarding too small clusters.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliersClustering(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+        const double clusterTolerance,
+        const int minClusterSize);
+
     // Methods for publishing the results.
     void publishPointCloud(
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
@@ -128,6 +134,7 @@ private:
     bool doDownsampling;
     bool doOutlierRemovalRadius;
     bool doOutlierRemovalStatistical;
+    bool doOutlierRemovalClustering;
 
     // Hyper parameters used for median filtering.
     int medianFilterWindowSize;
@@ -140,6 +147,8 @@ private:
     int outlierRemovalMinNeighborsInRadius;
     int outlierRemovalNeighborsToCheck;
     double outlierRemovalStdDeviationMultiplier;
+    double outlierRemovalClusterTolerance;
+    int outlierRemovalMinClusterSize;
 
     // Sensor intrinsics of the short throw depth sensor.
     float shortThrowMinDepth;

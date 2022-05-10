@@ -44,6 +44,8 @@
 #define REMOVE_OUTLIERS_RADIUS true
 // Should outliers be removed from new point clouds with a statistical outlier removal filter?
 #define REMOVE_OUTLIERS_STATISTICAL false
+// Should outliers be removed from new point clouds by clustering the point cloud and discarding all small clusters?
+#define REMOVE_OUTLIERS_CLUSTERING false
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
@@ -64,6 +66,10 @@
 // Parameters for the statistical outlier removal filter used for removing outliers.
 #define OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK 10           // The amount of nearest neighbors to check.
 #define OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER 0.5    // How far off the nearest neighbors may be from the std dev.
+
+// Parameters for the clustering outlier removal filter used for removing outliers.
+#define OUTLIER_REMOVAL_CLUSTER_TOLERANCE 0.05  // The distance between two clusters to be considered separate.
+#define OUTLIER_REMOVAL_MIN_CLUSTER_SIZE 100    // The minimum amount of points required inside a cluster.
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
@@ -129,6 +135,7 @@ DepthDataReceiver::DepthDataReceiver(
     n.param("doDownsampling", doDownsampling, DOWNSAMPLE_NEW_CLOUD);
     n.param("doOutlierRemovalRadius", doOutlierRemovalRadius, REMOVE_OUTLIERS_RADIUS);
     n.param("doOutlierRemovalStatistical", doOutlierRemovalStatistical, REMOVE_OUTLIERS_STATISTICAL);
+    n.param("doOutlierRemovalClustering", doOutlierRemovalClustering, REMOVE_OUTLIERS_CLUSTERING);
 
     // Initialize all hyper parameters as specified by parameters (or their default value).
     n.param("medianFilterWindowSize", medianFilterWindowSize, MEDIAN_FILTER_WINDOW_SIZE);
@@ -137,6 +144,8 @@ DepthDataReceiver::DepthDataReceiver(
     n.param("outlierRemovalMinNeighborsInRadius", outlierRemovalMinNeighborsInRadius, OUTLIER_REMOVAL_MIN_NEIGHBORS_IN_RADIUS);
     n.param("outlierRemovalNeighborsToCheck", outlierRemovalNeighborsToCheck, OUTLIER_REMOVAL_NEIGHBORS_TO_CHECK);
     n.param("outlierRemovalStdDeviationMultiplier", outlierRemovalStdDeviationMultiplier, OUTLIER_REMOVAL_STD_DEVIATION_MULTIPLIER);
+    n.param("outlierRemovalClusterTolerance", outlierRemovalClusterTolerance, OUTLIER_REMOVAL_CLUSTER_TOLERANCE);
+    n.param("outlierRemovalMinClusterSize", outlierRemovalMinClusterSize, OUTLIER_REMOVAL_MIN_CLUSTER_SIZE);
 
     // Initialize all sensor intrinsics as specified by parameters (or their default value).
     n.param("shortThrowMinDepth", shortThrowMinDepth, SHORT_THROW_MIN_DEPTH);
@@ -308,6 +317,9 @@ void DepthDataReceiver::handleDepthFrame(
     if (doOutlierRemovalStatistical)
         pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck, 
                 outlierRemovalStdDeviationMultiplier);
+    if (doOutlierRemovalClustering)
+        pointCloudCamSpace = removeOutliersClustering(pointCloudCamSpace, outlierRemovalClusterTolerance,
+                outlierRemovalMinClusterSize);
 
     // Calculate the transformation from camera space to world space and transform the point cloud.
     Eigen::Matrix4f camToWorld = computeCamToWorldFromDepthFrame(depthFrame);
@@ -471,6 +483,45 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::removeOutliersStatistical
 
     // Return the point cloud with the outliers removed.
     return pointCloudFiltered;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::removeOutliersClustering(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+    const double clusterTolerance,
+    const int minClusterSize)
+{
+    // Set up a KD tree for searching inside the cloud.
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>());
+    tree->setInputCloud(pointCloudToFilter);
+    
+    // Create a vector for storing the detected point indices of each cluster.
+    std::vector<pcl::PointIndices> clusters;
+
+    // Extract the clusters of the point cloud.
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> clusterExtraction;
+    clusterExtraction.setClusterTolerance(clusterTolerance);
+    clusterExtraction.setSearchMethod(tree);
+    clusterExtraction.setInputCloud(pointCloudToFilter);
+    clusterExtraction.extract(clusters);
+
+    // Create an indices extractor for removing each cluster from the cloud.
+    pcl::ExtractIndices<pcl::PointXYZ> extract;
+    extract.setInputCloud(pointCloudToFilter);
+
+    // Iterate over all found clusters and add all big enough clusters to the filtered point cloud.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filteredPointCloud (new pcl::PointCloud<pcl::PointXYZ>());
+    for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
+    {
+        if (iter->indices.size() >= minClusterSize)
+        {
+            for (const auto& idx : iter->indices)
+            {
+                filteredPointCloud->push_back((*pointCloudToFilter)[idx]);
+            }
+        }
+    }
+
+    return filteredPointCloud;
 }
 
 void DepthDataReceiver::publishPointCloud(
