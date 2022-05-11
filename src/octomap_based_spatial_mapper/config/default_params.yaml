@@ -1,0 +1,15 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Configuration file containing the default parameters for the octomap based spatial mapper.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Hyper parameters for insertion of point clouds into the octree data structure.
+octomapLeafSize: 0.05
+octomapMaxRange: -1.0
+
+# Switches and hyper parameters for octree filtering.
+doOctreeFiltering: true
+octreeFilteringNeighborhoodSize: 3
+
+# Hyper parameters for incorporating new octrees to the global spatial map.
+numFreeObservationsBeforeVoxelRemoval: 5
+numFramesBeforePossibleDynamicVoxelRemoval: 10

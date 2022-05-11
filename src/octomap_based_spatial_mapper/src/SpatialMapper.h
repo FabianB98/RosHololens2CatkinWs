@@ -1,10 +1,14 @@
 #include <unordered_map>
+#include <vector>
 
 #include "Topics.h"
 
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
+
+#include <boost/thread.hpp>
+#include <boost/thread/mutex.hpp>
 
 #include <octomap/octomap.h>
 #include <octomap/OcTree.h>
@@ -62,13 +66,11 @@ struct VoxelDiffInfo {
 
 struct PossibleDynamicVoxelInfo {
     uint32_t freeCounter;
-    uint32_t occupiedCounter;
     uint32_t lastUpdate;
 
     PossibleDynamicVoxelInfo(uint32_t _lastUpdate = 0)
     {
         freeCounter = 0;
-        occupiedCounter = 0;
         lastUpdate = _lastUpdate;
     }
 };
@@ -89,14 +91,14 @@ private:
     // Converts a PCL point cloud to an Octomap OcTree.
     octomap::OcTree* pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg);
 
+    // Filters an octree by removing all free voxels neighboring at least one unknown voxel.
+    octomap::OcTree* filterOctree(octomap::OcTree* octreeToFilter);
+
     // Compares each voxel of the new octree with the old octree.
     std::vector<VoxelDiffInfo> calculateOctreeVoxelDiff(
             octomap::OcTree* oldOctree,
             octomap::OcTree* newOctree,
             bool returnOnlyChanges = false);
-
-    // Detects dynamic voxels based on inconsistencies between the octrees of the previous frame and the current frame.
-    octomap::OcTree* detectDynamicVoxels(octomap::OcTree* previousFrameOctree, octomap::OcTree* currentFrameOctree);
 
     // Updates the octree containing the global spatial map based on the information contained in the given octree with
     // information obtained in the current frame.
@@ -105,14 +107,26 @@ private:
     // Publishes an Octomap OcTree using a given publisher.
     void publishOctree(const octomap::OcTree* octree, ros::Publisher& publisher, const ros::Time& timestamp);
 
-    // Hyperparameters for insertion of point clouds into the octree data structure.
+    // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
     double maxRange;
 
-    // Octrees storing information about the occupancy in the previous frame and the global spatial map.
-    octomap::OcTree* previousFrameOctree;
+    // Switches and hyper parameters for octree filtering.
+    bool doOctreeFiltering;
+    int octreeFilteringNeighborhoodSize;
+    std::vector<octomap::point3d> octreeFilteringNeighborhood;
+
+    // Hyper parameters for incorporating new octrees to the global spatial map.
+    int numFreeObservationsBeforeVoxelRemoval;
+    int numFramesBeforePossibleDynamicVoxelRemoval;
+
+    // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
 
+    // A mutex used for mutual exclusion when accessing the global spatial map.
+    boost::mutex spatialMapMutex;
+
+    // A list of voxels that may contain some movements.
     std::unordered_map<octomap::point3d, PossibleDynamicVoxelInfo> possibleDynamicVoxels;
     uint32_t dynamicVoxelsUpdateSequenceNumber;
 
