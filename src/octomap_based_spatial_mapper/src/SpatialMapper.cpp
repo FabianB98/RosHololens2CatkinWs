@@ -59,6 +59,8 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     // Advertise the topics to which the results will be published.
     octomapCurrentFramePublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_CURRENT_FRAME_TOPIC, 10);
     octomapStaticObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_STATIC_OBJECTS_TOPIC, 10);
+    octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
+    pointCloudDynamicObjectsPublisher = n.advertise<sensor_msgs::PointCloud2>(POINT_CLOUD_DYNAMIC_OBJECTS_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -68,7 +70,11 @@ SpatialMapper::~SpatialMapper()
 
 void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg)
 {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr currentFramePointCloud (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::fromROSMsg(*msg, *currentFramePointCloud);
+
     octomap::OcTree* currentFrameOctree = pointCloudToOctree(msg);
+    currentFrameOctree->expand();
 
     // Filter all free voxels at the edges of the new octree. This will ensure that we don't accidentally mark voxels
     // as free even though they are actually occupied by some object which is ever so slightly outside the sensor's
@@ -84,18 +90,34 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
     if (doOctreeFiltering)
     {
         octomap::OcTree* filteredOctree = filterOctree(currentFrameOctree);
+        filteredOctree->expand();
+
         delete currentFrameOctree;
         currentFrameOctree = filteredOctree;
     }
 
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
-    updateStaticObjectsOctree(currentFrameOctree);
+    StaticObjectsOctreeUpdateResult updateResult = updateStaticObjectsOctree(currentFrameOctree);
+    octomap::OcTree* dynamicObjectsOctree = possibleDynamicVoxelsToOctree();
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr dynamicObjectsPointCloud = 
+            extractPointsCorrespondingToVoxels(currentFramePointCloud, updateResult.dynamicVoxelCenterPoints);
+
+    // Prune all previously expanded octrees in order to save space when publishing these octrees.
+    currentFrameOctree->prune();
 
     // Publish the results.
     ros::Time time = ros::Time::now();
     octomapSequenceNumber++;
+    pointCloudSequenceNumber++;
     publishOctree(currentFrameOctree, octomapCurrentFramePublisher, time);
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
+    publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
+    publishPointCloud(dynamicObjectsPointCloud, pointCloudDynamicObjectsPublisher, time);
+
+    // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
+    delete currentFrameOctree;
+    delete dynamicObjectsOctree;
 }
 
 octomap::OcTree* SpatialMapper::pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg)
@@ -126,8 +148,10 @@ octomap::OcTree* SpatialMapper::pointCloudToOctree(const sensor_msgs::PointCloud
 
 octomap::OcTree* SpatialMapper::filterOctree(octomap::OcTree* octreeToFilter)
 {
-    // The unfiltered octree needs to be expanded so that we can traverse all its leaves.
-    octreeToFilter->expand();
+    // The unfiltered octree needs to be expanded so that we can traverse all its leaves. This method assumes that the
+    // given octree is already expanded (as we can therefore save some time by not expanding and pruning the same octree
+    // multiple times). However, this method will therefore produce unwanted results when given an octree which is not
+    // already expanded.
     
     octomap::OcTree* filteredOctree = new octomap::OcTree(leafSize);
     for (auto it = octreeToFilter->begin_leafs(); it != octreeToFilter->end_leafs(); ++it)
@@ -165,9 +189,6 @@ octomap::OcTree* SpatialMapper::filterOctree(octomap::OcTree* octreeToFilter)
         next_loop_iteration:;
     }
 
-    // The unfiltered octree can be pruned again to save space.
-    octreeToFilter->prune();
-
     return filteredOctree;
 }
 
@@ -179,8 +200,10 @@ std::vector<VoxelDiffInfo> SpatialMapper::calculateOctreeVoxelDiff(
     // Some parts of the following code on how to traverse an octree whilst comparing it with another octree (e.g. for
     // merging two octrees) were adopted from https://github.com/OctoMap/octomap/issues/227#issuecomment-571336801
 
-    // The new octree needs to be expanded so that we can traverse all its leaves.
-    newOctree->expand();
+    // The new octree needs to be expanded so that we can traverse all its leaves. This method assumes that the given
+    // octree is already expanded (as we can therefore save some time by not expanding and pruning the same octree
+    // multiple times). However, this method will therefore produce unwanted results when given an octree which is not
+    // already expanded.
 
     // Iterate over all voxels for which we have acquired some information in the current frame.
     std::vector<VoxelDiffInfo> result;
@@ -243,14 +266,13 @@ std::vector<VoxelDiffInfo> SpatialMapper::calculateOctreeVoxelDiff(
         }
     }
 
-    // The new octree can be pruned again to save space.
-    newOctree->prune();
-
     return result;
 }
 
-void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree)
+StaticObjectsOctreeUpdateResult SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree)
 {
+    StaticObjectsOctreeUpdateResult result;
+
     spatialMapMutex.lock();
 
     std::vector<VoxelDiffInfo> diff = calculateOctreeVoxelDiff(staticObjectsOctree, currentFrameOctree);
@@ -261,11 +283,13 @@ void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctre
             // Azim 2012 paper states: "If the transition between these two states for a specific voxel of the grid is
             // such that S_{t-1} = free and S_t = occupied then this is the case when an object is detected on a
             // location previously seen as free space and it is possibly a moving object. We add it to the list of
-            // possible dynamic voxels."
+            // possible dynamic voxels.
             possibleDynamicVoxels[it->coordinates] = PossibleDynamicVoxelInfo(dynamicVoxelsUpdateSequenceNumber);
 
             // What if the initial observation about the voxel being free was a measurement error? This is not mentioned
             // in the paper...
+
+            result.dynamicVoxelCenterPoints.push_back(it->coordinates);
         }
         else if (it->type == VoxelDiffType::OCCUPIED_FREE)
         {
@@ -292,6 +316,7 @@ void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctre
                 possibleDynamicVoxels.erase(it->coordinates);
 
                 it->nodeOldOctree->setLogOdds(-1.0);
+                result.clearedVoxelCenterPoints.push_back(it->coordinates);
             }
 
             // What if we only observed the voxel in the first frame as being occupied and after that always as free
@@ -308,6 +333,8 @@ void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctre
             {
                 possibleDynamicVoxels.erase(it->coordinates);
             }
+
+            result.staticVoxelCenterPoints.push_back(it->coordinates);
         }
         else if (it->type == VoxelDiffType::UNKNOWN_OCCUPIED)
         {
@@ -316,6 +343,8 @@ void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctre
             // later evidences come."
             octomap::OcTreeNode* insertedNode = staticObjectsOctree->updateNode(it->coordinates, true);
             insertedNode->setLogOdds(1.0);
+
+            result.staticVoxelCenterPoints.push_back(it->coordinates);
         }
         else if (it->type == VoxelDiffType::UNKNOWN_FREE)
         {
@@ -340,7 +369,54 @@ void SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctre
         }
     }
 
+    dynamicVoxelsUpdateSequenceNumber++;
+
     spatialMapMutex.unlock();
+
+    return result;
+}
+
+octomap::OcTree* SpatialMapper::possibleDynamicVoxelsToOctree()
+{
+    octomap::OcTree* dynamicVoxelsOctree = new octomap::OcTree(leafSize);
+
+    spatialMapMutex.lock();
+
+    for (auto it = possibleDynamicVoxels.begin(); it != possibleDynamicVoxels.end(); it++)
+    {
+        octomap::OcTreeNode* insertedNode = dynamicVoxelsOctree->updateNode(it->first, true);
+        insertedNode->setLogOdds(1.0);
+    }
+
+    spatialMapMutex.unlock();
+
+    return dynamicVoxelsOctree;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr SpatialMapper::extractPointsCorrespondingToVoxels(
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+        std::vector<octomap::point3d> voxelCenterPoints)
+{
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointsInVoxels (new pcl::PointCloud<pcl::PointXYZ>());
+
+    // Iterating over all voxels and filtering the points of each voxel separately is definitely NOT performant. This
+    // needs to be changed in the future to incorporate some better algorithm which clusters neighboring voxels into a
+    // single, but larger box.
+    // float halfLeafSize = leafSize / 2.0;
+    // for (auto it = voxelCenterPoints.begin(); it != voxelCenterPoints.end(); it++)
+    // {
+    //     pcl::PointCloud<pcl::PointXYZ>::Ptr pointsInCurrentVoxel (new pcl::PointCloud<pcl::PointXYZ>());
+
+    //     pcl::CropBox<pcl::PointXYZ> boxFilter;
+    //     boxFilter.setMin(Eigen::Vector4f(it->x() - halfLeafSize, it->y() - halfLeafSize, it->z() - halfLeafSize, 1.0));
+    //     boxFilter.setMax(Eigen::Vector4f(it->x() + halfLeafSize, it->y() + halfLeafSize, it->z() + halfLeafSize, 1.0));
+    //     boxFilter.setInputCloud(pointCloudToFilter);
+    //     boxFilter.filter(*pointsInCurrentVoxel);
+
+    //     *pointsInVoxels += *pointsInCurrentVoxel;
+    // }
+
+    return pointsInVoxels;
 }
 
 void SpatialMapper::publishOctree(const octomap::OcTree* octree, ros::Publisher& publisher, const ros::Time& timestamp)
@@ -353,4 +429,19 @@ void SpatialMapper::publishOctree(const octomap::OcTree* octree, ros::Publisher&
     octomapMsg.header.frame_id = "hololens_world";
 
     publisher.publish(octomapMsg);
+}
+
+void SpatialMapper::publishPointCloud(
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp)
+{
+    sensor_msgs::PointCloud2 pointCloudMessage;
+    pcl::toROSMsg(*cloud, pointCloudMessage);
+
+    pointCloudMessage.header.seq = pointCloudSequenceNumber;
+    pointCloudMessage.header.stamp = timestamp;
+    pointCloudMessage.header.frame_id = "hololens_world";
+
+    publisher.publish(pointCloudMessage);
 }

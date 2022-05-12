@@ -17,6 +17,9 @@
 
 #include <tf/transform_listener.h>
 
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/crop_box.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 namespace std {
@@ -75,6 +78,22 @@ struct PossibleDynamicVoxelInfo {
     }
 };
 
+struct StaticObjectsOctreeUpdateResult
+{
+    // The center points of all occupied voxels (in the octomap of the new sensor data frame) which were classified as
+    // static voxels.
+    std::vector<octomap::point3d> staticVoxelCenterPoints;
+
+    // The center points of all occupied voxels (in the octomap of the new sensor data frame) which were classified as
+    // dynamic voxels.
+    std::vector<octomap::point3d> dynamicVoxelCenterPoints;
+
+    // The center points of all occupied voxels (in the octomap of the new frame) which were previously assumed to be
+    // static, but were now determined to be dynamic. All points in the spatial map point cloud which lie in any of
+    // these voxels should be removed from the spatial map as we no longer consider them part of the static environment.
+    std::vector<octomap::point3d> clearedVoxelCenterPoints;
+};
+
 class SpatialMapper
 {
 public:
@@ -91,21 +110,35 @@ private:
     // Converts a PCL point cloud to an Octomap OcTree.
     octomap::OcTree* pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg);
 
-    // Filters an octree by removing all free voxels neighboring at least one unknown voxel.
+    // Filters an octree (must be expanded) by removing all free voxels neighboring at least one unknown voxel.
     octomap::OcTree* filterOctree(octomap::OcTree* octreeToFilter);
 
-    // Compares each voxel of the new octree with the old octree.
+    // Compares each voxel of the new octree (must be expanded) with the old octree.
     std::vector<VoxelDiffInfo> calculateOctreeVoxelDiff(
             octomap::OcTree* oldOctree,
             octomap::OcTree* newOctree,
             bool returnOnlyChanges = false);
 
-    // Updates the octree containing the global spatial map based on the information contained in the given octree with
-    // information obtained in the current frame.
-    void updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree);
+    // Updates the octree containing the global spatial map based on the information contained in the given octree (must
+    // be expanded) with information obtained in the current frame.
+    StaticObjectsOctreeUpdateResult updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree);
+
+    // Creates an octree in which all possible dynamic voxels are marked as occupied.
+    octomap::OcTree* possibleDynamicVoxelsToOctree();
+
+    // Extracts all the given point cloud's points which lie inside the voxels denoted by the given voxel center points.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr extractPointsCorrespondingToVoxels(
+            pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
+            std::vector<octomap::point3d> voxelCenterPoints);
 
     // Publishes an Octomap OcTree using a given publisher.
     void publishOctree(const octomap::OcTree* octree, ros::Publisher& publisher, const ros::Time& timestamp);
+
+    // Publishes a point cloud using a given publisher.
+    void publishPointCloud(
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+            ros::Publisher& publisher,
+            const ros::Time& timestamp);
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -136,7 +169,10 @@ private:
     // ROS publishers.
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
+    ros::Publisher octomapDynamicObjectsPublisher;
+    ros::Publisher pointCloudDynamicObjectsPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;
+    uint32_t pointCloudSequenceNumber;
 };
