@@ -4,5 +4,4 @@
 #define OCTOMAP_CURRENT_FRAME_TOPIC "octomapCurrentFrame"
 #define OCTOMAP_STATIC_OBJECTS_TOPIC "octomapStaticObjects"
 #define OCTOMAP_DYNAMIC_OBJECTS_TOPIC "octomapDynamicObjects"
-
-#define POINT_CLOUD_DYNAMIC_OBJECTS_TOPIC "pointCloudDynamicObjects"
+#define OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC "octomapDynamicObjectClusters"

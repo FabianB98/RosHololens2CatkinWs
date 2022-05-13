@@ -1,4 +1,5 @@
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Topics.h"
@@ -123,8 +124,11 @@ private:
     // be expanded) with information obtained in the current frame.
     StaticObjectsOctreeUpdateResult updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree);
 
-    // Creates an octree in which all possible dynamic voxels are marked as occupied.
-    octomap::OcTree* possibleDynamicVoxelsToOctree();
+    // Creates an octree where all voxels denoted by the given voxel center points are marked as occupied.
+    octomap::OcTree* voxelCenterPointsToOctree(std::vector<octomap::point3d> voxelCenterPoints);
+
+    // Detects clusters in the given octree (must be expanded and may only contain occupied and unknown voxels).
+    std::vector<std::vector<octomap::point3d>> detectVoxelClusters(octomap::OcTree* octreeToCluster);
 
     // Extracts all the given point cloud's points which lie inside the voxels denoted by the given voxel center points.
     pcl::PointCloud<pcl::PointXYZ>::Ptr extractPointsCorrespondingToVoxels(
@@ -132,13 +136,18 @@ private:
             std::vector<octomap::point3d> voxelCenterPoints);
 
     // Publishes an Octomap OcTree using a given publisher.
-    void publishOctree(const octomap::OcTree* octree, ros::Publisher& publisher, const ros::Time& timestamp);
+    template<class OctomapT>
+    void publishOctree(const OctomapT* octree, ros::Publisher& publisher, const ros::Time& timestamp)
+    {
+        octomap_msgs::Octomap octomapMsg;
+        octomap_msgs::fullMapToMsg(*octree, octomapMsg);
 
-    // Publishes a point cloud using a given publisher.
-    void publishPointCloud(
-            pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
-            ros::Publisher& publisher,
-            const ros::Time& timestamp);
+        octomapMsg.header.seq = octomapSequenceNumber;
+        octomapMsg.header.stamp = timestamp;
+        octomapMsg.header.frame_id = "hololens_world";
+
+        publisher.publish(octomapMsg);
+    }
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -152,6 +161,11 @@ private:
     // Hyper parameters for incorporating new octrees to the global spatial map.
     int numFreeObservationsBeforeVoxelRemoval;
     int numFramesBeforePossibleDynamicVoxelRemoval;
+
+    // Hyper parameters for clustering dynamic voxels.
+    double voxelClusteringClusterDistance;
+    int voxelClusteringMinClusterSize;
+    std::vector<octomap::point3d> voxelClusteringNeighborhood;
 
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
@@ -170,9 +184,8 @@ private:
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;
-    ros::Publisher pointCloudDynamicObjectsPublisher;
+    ros::Publisher octomapDynamicObjectClustersPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;
-    uint32_t pointCloudSequenceNumber;
 };
