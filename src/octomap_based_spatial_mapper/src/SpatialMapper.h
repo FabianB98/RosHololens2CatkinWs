@@ -130,6 +130,9 @@ private:
     // Detects clusters in the given octree (must be expanded and may only contain occupied and unknown voxels).
     std::vector<std::vector<octomap::point3d>> detectVoxelClusters(octomap::OcTree* octreeToCluster);
 
+    // Creates a colorized octree where a voxels belonging to the same cluster will have the same color.
+    octomap::ColorOcTree* createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters);
+
     // Extracts all the given point cloud's points which lie inside the voxels denoted by the given voxel center points.
     pcl::PointCloud<pcl::PointXYZ>::Ptr extractPointsCorrespondingToVoxels(
             pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
@@ -163,9 +166,10 @@ private:
     int numFramesBeforePossibleDynamicVoxelRemoval;
 
     // Hyper parameters for clustering dynamic voxels.
-    double voxelClusteringClusterDistance;
+    double voxelClusteringRelativeClusterDistance;
     int voxelClusteringMinClusterSize;
     std::vector<octomap::point3d> voxelClusteringNeighborhood;
+    std::vector<octomap::ColorOcTreeNode::Color> voxelClusterColors;
 
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;

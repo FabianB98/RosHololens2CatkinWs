@@ -18,6 +18,10 @@
 #define NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL 5        // Mark occupied voxel as free after this many free observations.
 #define NUM_FRAMES_BEFORE_POSSIBLE_DYNAMIC_VOXEL_REMOVAL 10 // Remove dynamic status after at most this many frames.
 
+// Hyper parameters for clustering dynamic voxels.
+#define VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE 1.9  // The mininum distance between two clusters relative to leaf size.
+#define VOXEL_CLUSTERING_MIN_CLUSTER_SIZE 10            // Discard clusters with less than this amount of voxels.
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                              ACTUAL CODE STARTS HERE                                               //
@@ -35,6 +39,8 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("octreeFilteringNeighborhoodSize", octreeFilteringNeighborhoodSize, OCTREE_FILTERING_NEIGHBORHOOD_SIZE);
     n.param("numFreeObservationsBeforeVoxelRemoval", numFreeObservationsBeforeVoxelRemoval, NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL);
     n.param("numFramesBeforePossibleDynamicVoxelRemoval", numFramesBeforePossibleDynamicVoxelRemoval, NUM_FRAMES_BEFORE_POSSIBLE_DYNAMIC_VOXEL_REMOVAL);
+    n.param("voxelClusteringRelativeClusterDistance", voxelClusteringRelativeClusterDistance, VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE);
+    n.param("voxelClusteringMinClusterSize", voxelClusteringMinClusterSize, VOXEL_CLUSTERING_MIN_CLUSTER_SIZE);
 
     // Initialize the array of the neighborhood to check when filtering voxels.
     int halfNeighborhoodSize = octreeFilteringNeighborhoodSize / 2;
@@ -53,14 +59,10 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
         }
     }
 
-    // TODO: voxelClusteringClusterDistance and voxelClusteringMinClusterSize should be configurable parameters.
-    leafSize = 0.1;
-    voxelClusteringClusterDistance = leafSize * 1.9;
-    voxelClusteringMinClusterSize = 1; //10;
-
     // Initialize the array of the neighborhood to check when clustering voxels.
-    double squaredClusterDistance = voxelClusteringClusterDistance * voxelClusteringClusterDistance;
-    halfNeighborhoodSize = static_cast<int>(ceil(voxelClusteringClusterDistance / leafSize));
+    double clusterDistance = voxelClusteringRelativeClusterDistance * leafSize;
+    double squaredClusterDistance = clusterDistance * clusterDistance;
+    halfNeighborhoodSize = static_cast<int>(ceil(clusterDistance / leafSize));
     for (int x = -halfNeighborhoodSize; x <= halfNeighborhoodSize; x++)
     {
         for (int y = -halfNeighborhoodSize; y <= halfNeighborhoodSize; y++)
@@ -84,6 +86,32 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
         }
     }
 
+    // Define the colors to use for clustering voxel clusters. I'm just going to assume that there will never be more
+    // than 16 dynamic objects visible at once. If there will ever be more clusters than that, the assigned colors will
+    // wrap around (i.e. the 17th cluster will have the same color as the first cluster, the 18th cluster will have the
+    // same color as the second cluster, and so on). If that will ever be an issue, it is sufficient to add more colors
+    // to this list.
+    voxelClusterColors =
+            {
+                octomap::ColorOcTreeNode::Color(255, 0, 0),
+                octomap::ColorOcTreeNode::Color(255, 128, 0),
+                octomap::ColorOcTreeNode::Color(255, 255, 0),
+                octomap::ColorOcTreeNode::Color(0, 255, 0),
+                octomap::ColorOcTreeNode::Color(0, 255, 255),
+                octomap::ColorOcTreeNode::Color(0, 0, 255),
+                octomap::ColorOcTreeNode::Color(255, 0, 255),
+                octomap::ColorOcTreeNode::Color(255, 255, 255),
+                
+                octomap::ColorOcTreeNode::Color(128, 0, 0),
+                octomap::ColorOcTreeNode::Color(128, 64, 0),
+                octomap::ColorOcTreeNode::Color(128, 128, 0),
+                octomap::ColorOcTreeNode::Color(0, 128, 0),
+                octomap::ColorOcTreeNode::Color(0, 128, 128),
+                octomap::ColorOcTreeNode::Color(0, 0, 128),
+                octomap::ColorOcTreeNode::Color(128, 0, 128),
+                octomap::ColorOcTreeNode::Color(128, 128, 128)
+            };
+
     // Initialize the global spatial map.
     staticObjectsOctree = new octomap::OcTree(leafSize);
 
@@ -92,60 +120,6 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     octomapStaticObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_STATIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
-
-
-
-
-    // TEMPORARY TEST CODE FOR DEBUGGING. NEEDS TO BE REMOVED LATER ON!
-    std::vector<octomap::point3d> voxelCenterPoints;
-
-    // for (int x = 0; x < 10; x++)
-    // {
-    //     for (int y = 0; y < 10; y++)
-    //     {
-    //         for (int z = -100; z < -99; z++)
-    //         {
-    //             voxelCenterPoints.push_back(octomap::point3d((x + 0.5) * leafSize, (y + 0.5) * leafSize, (z + 0.5) * leafSize));
-    //         }
-    //     }
-    // }
-
-    voxelCenterPoints.push_back(octomap::point3d(1.5 * leafSize, 9.5 * leafSize, 1.5 * leafSize));
-    voxelCenterPoints.push_back(octomap::point3d(1.5 * leafSize, 8.5 * leafSize, 1.5 * leafSize));
-    voxelCenterPoints.push_back(octomap::point3d(2.5 * leafSize, 8.5 * leafSize, 2.5 * leafSize));
-    voxelCenterPoints.push_back(octomap::point3d(3.5 * leafSize, 7.5 * leafSize, 2.5 * leafSize));
-
-    for (int x = 0; x < 3; x++)
-    {
-        for (int y = 0; y < 3; y++)
-        {
-            for (int z = 0; z < 3; z++)
-            {
-                voxelCenterPoints.push_back(octomap::point3d((x + 0.5) * leafSize, (y + 0.5) * leafSize, (z + 0.5) * leafSize));
-            }
-        }
-    }
-
-    // for (int x = 5; x < 7; x++)
-    // {
-    //     for (int y = 0; y < 2; y++)
-    //     {
-    //         for (int z = 0; z < 2; z++)
-    //         {
-    //             voxelCenterPoints.push_back(octomap::point3d((x + 0.5) * leafSize, (y + 0.5) * leafSize, (z + 0.5) * leafSize));
-    //         }
-    //     }
-    // }
-
-    octomap::OcTree* octree = voxelCenterPointsToOctree(voxelCenterPoints);
-    octree->expand();
-    std::vector<std::vector<octomap::point3d>> clusters = detectVoxelClusters(octree);
-    ROS_INFO("Detected %lu clusters.", clusters.size());
-    for (int i = 0; i < clusters.size(); i++)
-    {
-        std::vector<octomap::point3d>& cluster = clusters[i];
-        ROS_INFO("   Cluster contains %lu voxels.", cluster.size());
-    }
 }
 
 SpatialMapper::~SpatialMapper()
@@ -185,25 +159,7 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
     // Cluster all dynamic voxels.
     dynamicObjectsOctree->expand();
     std::vector<std::vector<octomap::point3d>> dynamicObjectClusters = detectVoxelClusters(dynamicObjectsOctree);
-
-    // TODO: This code for cluster coloring definitely needs to be tidied up...
-    std::vector<std::vector<uint8_t>> clusterColors = { {255, 0, 0}, {255, 255, 0}, {0, 255, 0}, {0, 255, 255}, {0, 0, 255}, {255, 0, 255}, {255, 255, 255}, {128, 128, 128} };
-    octomap::ColorOcTree dynamicObjectClustersOctree = octomap::ColorOcTree(leafSize);
-    ROS_INFO("Detected %lu clusters.", dynamicObjectClusters.size());
-    for (int i = 0; i < dynamicObjectClusters.size(); i++)
-    {
-        std::vector<octomap::point3d>& cluster = dynamicObjectClusters[i];
-
-        ROS_INFO("   Cluster contains %lu voxels.", cluster.size());
-
-        std::vector<uint8_t>& color = clusterColors[i % clusterColors.size()];
-        for (auto voxelIt = cluster.begin(); voxelIt != cluster.end(); voxelIt++)
-        {
-            octomap::ColorOcTreeNode* insertedNode = dynamicObjectClustersOctree.updateNode(*voxelIt, true);
-            insertedNode->setLogOdds(1.0);
-            insertedNode->setColor(color[0], color[1], color[2]);
-        }
-    }
+    octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -215,11 +171,12 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
     publishOctree(currentFrameOctree, octomapCurrentFramePublisher, time);
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
-    publishOctree(&dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
+    publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
     delete dynamicObjectsOctree;
+    delete dynamicObjectClustersOctree;
 }
 
 octomap::OcTree* SpatialMapper::pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg)
@@ -495,21 +452,14 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
 {
     // As described in the Azim 2012 paper, clustering of voxels can be done "using an approach similar to a region-
     // growing algorithm".
-    // Initially, none of the voxels is checked, so we need to create a list (or set in this implementation) of all
+    // Initially, none of the voxels is checked, so we need to create a list (or a set in this implementation) of all
     // voxels that need to be checked (which obviously starts of containing all voxels of the octree to cluster).
     std::unordered_set<octomap::point3d> voxelsToCheck;
-    octomap::OcTree voxelsToCheckOctree = octomap::OcTree(leafSize);
-    uint32_t numVoxelsToCheck = 0;
     for (octomap::OcTree::leaf_iterator it = octreeToCluster->begin_leafs(); it != octreeToCluster->end_leafs(); ++it)
     {
         voxelsToCheck.insert(it.getCoordinate());
-        voxelsToCheckOctree.updateNode(it.getCoordinate(), true)->setLogOdds(1.0);
-        numVoxelsToCheck++;
-        ROS_INFO("Voxel to check at (%f | %f | %f)", it.getCoordinate().x(), it.getCoordinate().y(), it.getCoordinate().z());
     }
-    voxelsToCheckOctree.expand();
-    ROS_INFO("%u voxels to check.", numVoxelsToCheck);
-
+    
     std::vector<std::vector<octomap::point3d>> result;
 
     // The following loop takes care of the region-growing part. While it's not an exact implementation of what is
@@ -520,17 +470,16 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
     // Euclidean distance between the center of the current voxel and the voxel in consideration. If this criterion is
     // satisfied by the current voxel then it is added to the cluster. Now, we use this newly added voxel further and
     // continue the search within its neighborhood in a recursive manner."
-    while (numVoxelsToCheck > 0)
+    while (!voxelsToCheck.empty())
     {
         // As long as there are still voxels left to check (i.e. there are voxels which were not assigned to any cluster
         // yet), there is at least one cluster left. Therefore, we initialize a new cluster.
         std::vector<octomap::point3d> clusterVoxels;
 
-        // All voxels in the set of voxels to check are not assigned to any cluster, so we can arbitrarily choose one
-        // and use it as the seed point of the next cluster.
-        octomap::point3d seedPoint = voxelsToCheckOctree.begin_leafs().getCoordinate();
-        ROS_INFO("Creating new cluster with seed point (%f | %f | %f)", seedPoint.x(), seedPoint.y(), seedPoint.z());
-
+        // All free voxels in the octree of voxels to check are not assigned to any cluster, so we can arbitrarily
+        // choose one and use it as the seed point of the next cluster.
+        octomap::point3d seedPoint = *voxelsToCheck.begin();
+        
         // Cluster candidate voxels are all voxels in Neighbor(v) which were not checked yet, where v is any voxel which
         // is part of the current cluster.
         // Starting from the cluster's seed point, we'll recursively check search the cluster's neighborhood for any
@@ -543,26 +492,32 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
             // next. In this implementation, I'm using the one which was added most recently to the list of candidates
             // as this is the most efficient way (at least as long as the cluster candidates are stored in a vector).
             octomap::point3d voxelCenterPoint = clusterCandidateVoxels.back();
+            voxelCenterPoint = octreeToCluster->keyToCoord(octreeToCluster->coordToKey(voxelCenterPoint));
             clusterCandidateVoxels.pop_back();
-            ROS_INFO("Checking cluster candidate (%f | %f | %f)...", voxelCenterPoint.x(), voxelCenterPoint.y(), voxelCenterPoint.z());
-
+            
             // Ensure that we didn't already check this voxel. Otherwise we would run into an endless loop caused by
             // traversing loops in the neighborhood graph of the voxels.
             if (voxelsToCheck.find(voxelCenterPoint) != voxelsToCheck.end())
             {
-                ROS_INFO("Not assigned to any cluster yet. Adding to cluster...");
-
-                // Current voxel was not checked yet. Mark it as checked and add it to the cluster.
+                // Current voxel was not checked yet. Mark it as checked.
                 voxelsToCheck.erase(voxelCenterPoint);
-                numVoxelsToCheck--;
+
+                // Before adding the voxel center point to the current cluster, ensure that voxelCenterPoint actually
+                // represents the center of the current voxel. Due to floating point precision issues the calculated
+                // center point may not be exactly in the voxel's center and might need to be ever so slightly adjusted.
                 clusterVoxels.push_back(voxelCenterPoint);
 
                 // Add all neighbors of the current voxel to the candidate list. This is the part which would cause an
                 // infinite loop if we didn't check whether the current voxel was already checked.
                 for (size_t i = 0; i < voxelClusteringNeighborhood.size(); i++)
                 {
+                    // The conversion from coord to key back to coord is needed to ensure that the calculated voxel
+                    // center point is actually in the center of the voxel. Due to floating point imprecisions the
+                    // calculated center point may not be exactly in the voxel's center and might need to be ever so
+                    // slightly adjusted. If this wasn't done, it may happen that some of the neighbors may not be found
+                    // in the voxelsToCheck set during lookup even though they are in that set.
                     octomap::point3d neighbor = voxelCenterPoint + voxelClusteringNeighborhood[i];
-                    ROS_INFO("Adding neighboring voxel (%f | %f | %f) as cluster candidate...", neighbor.x(), neighbor.y(), neighbor.z());
+                    neighbor = octreeToCluster->keyToCoord(octreeToCluster->coordToKey(neighbor));
                     clusterCandidateVoxels.push_back(voxelCenterPoint + voxelClusteringNeighborhood[i]);
                 }
             }
@@ -576,4 +531,26 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
     }
 
     return result;
+}
+
+octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters)
+{
+    octomap::ColorOcTree* colorizedClusterOctree = new octomap::ColorOcTree(leafSize);
+    
+    for (int i = 0; i < clusters.size(); i++)
+    {
+        std::vector<octomap::point3d>& cluster = clusters[i];
+
+        int colorIndex = i % voxelClusterColors.size();
+        octomap::ColorOcTreeNode::Color& clusterColor = voxelClusterColors[colorIndex];
+
+        for (auto voxelIt = cluster.begin(); voxelIt != cluster.end(); voxelIt++)
+        {
+            octomap::ColorOcTreeNode* insertedNode = colorizedClusterOctree->updateNode(*voxelIt, true);
+            insertedNode->setLogOdds(1.0);
+            insertedNode->setColor(clusterColor);
+        }
+    }
+
+    return colorizedClusterOctree;
 }

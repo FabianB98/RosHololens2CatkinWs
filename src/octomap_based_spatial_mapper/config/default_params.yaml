@@ -13,3 +13,7 @@ octreeFilteringNeighborhoodSize: 3
 # Hyper parameters for incorporating new octrees to the global spatial map.
 numFreeObservationsBeforeVoxelRemoval: 5
 numFramesBeforePossibleDynamicVoxelRemoval: 10
+
+# Hyper parameters for clustering dynamic voxels.
+voxelClusteringRelativeClusterDistance: 1.9
+voxelClusteringMinClusterSize: 10
