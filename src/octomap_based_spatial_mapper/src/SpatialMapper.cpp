@@ -10,13 +10,18 @@
 #define LEAF_SIZE 0.05  // The size of a voxel (in meters).
 #define MAX_RANGE -1.0  // The maximum range for how long individual beams are inserted into the octree data structure.
 
-// Switches and hyper parameters for octree filtering.
-#define DO_OCTREE_FILTERING true                // Whether free voxels at the borders of new octrees should be filtered.
+// Switches and hyper parameters for octree freespace filtering.
+#define DO_OCTREE_FREESPACE_FILTERING true      // Whether free voxels at the borders of new octrees should be filtered.
 #define OCTREE_FILTERING_NEIGHBORHOOD_SIZE 3    // The size of the neighborhood to check when filtering octrees.
 
 // Hyper parameters for incorporating new octrees to the global spatial map.
 #define NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL 5        // Mark occupied voxel as free after this many free observations.
 #define NUM_FRAMES_BEFORE_POSSIBLE_DYNAMIC_VOXEL_REMOVAL 10 // Remove dynamic status after at most this many frames.
+
+// Hyper parameters for floor removal in voxels of dynamic objects.
+#define DO_FLOOR_REMOVAL_IN_DYNAMIC_VOXELS true // Whether potential floor voxels should be removed in dynamic voxels.
+#define FLOOR_REMOVAL_MIN_FLOOR_VOXELS 25       // The minimum amount of potential floor voxels that need to be found.
+#define FLOOR_REMOVAL_RELATIVE_NOISE_HEIGHT 1   // The relative height (in voxels) in which potential floor voxels can be.
 
 // Hyper parameters for clustering dynamic voxels.
 #define VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE 1.9  // The mininum distance between two clusters relative to leaf size.
@@ -35,10 +40,13 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     // Initialize all switches and hyper parameters as specified by parameters (or their default value).
     n.param("octomapLeafSize", leafSize, LEAF_SIZE);
     n.param("octomapMaxRange", maxRange, MAX_RANGE); // TODO: maxRange could be fetched from the hololens_depth_data_receiver package.
-    n.param("doOctreeFiltering", doOctreeFiltering, DO_OCTREE_FILTERING);
+    n.param("doOctreeFreespaceFiltering", doOctreeFreespaceFiltering, DO_OCTREE_FREESPACE_FILTERING);
     n.param("octreeFilteringNeighborhoodSize", octreeFilteringNeighborhoodSize, OCTREE_FILTERING_NEIGHBORHOOD_SIZE);
     n.param("numFreeObservationsBeforeVoxelRemoval", numFreeObservationsBeforeVoxelRemoval, NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL);
     n.param("numFramesBeforePossibleDynamicVoxelRemoval", numFramesBeforePossibleDynamicVoxelRemoval, NUM_FRAMES_BEFORE_POSSIBLE_DYNAMIC_VOXEL_REMOVAL);
+    n.param("doFloorRemovalInDynamicObjects", doFloorRemovalInDynamicObjects, DO_FLOOR_REMOVAL_IN_DYNAMIC_VOXELS);
+    n.param("floorRemovalMinFloorVoxels", floorRemovalMinFloorVoxels, FLOOR_REMOVAL_MIN_FLOOR_VOXELS);
+    n.param("floorRemovalRelativeNoiseHeight", floorRemovalRelativeNoiseHeight, FLOOR_REMOVAL_RELATIVE_NOISE_HEIGHT);
     n.param("voxelClusteringRelativeClusterDistance", voxelClusteringRelativeClusterDistance, VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE);
     n.param("voxelClusteringMinClusterSize", voxelClusteringMinClusterSize, VOXEL_CLUSTERING_MIN_CLUSTER_SIZE);
 
@@ -143,9 +151,9 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
     // caused by the sensor's finite viewing angle, there is no evidence for these voxels to be classified as occupied,
     // so they will be wrongly classified as free.
     // As the HoloLens's depth sensor has no 360° field of view, filtering the octree is therefore highly recommended.
-    if (doOctreeFiltering)
+    if (doOctreeFreespaceFiltering)
     {
-        octomap::OcTree* filteredOctree = filterOctree(currentFrameOctree);
+        octomap::OcTree* filteredOctree = filterOctreeFreespace(currentFrameOctree);
         filteredOctree->expand();
 
         delete currentFrameOctree;
@@ -154,7 +162,22 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
 
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
     StaticObjectsOctreeUpdateResult updateResult = updateStaticObjectsOctree(currentFrameOctree);
-    octomap::OcTree* dynamicObjectsOctree = voxelCenterPointsToOctree(updateResult.dynamicVoxelCenterPoints);
+    octomap::OcTree* dynamicObjectsOctree;
+    if (doFloorRemovalInDynamicObjects)
+    {
+        // Potential floor voxels should be removed. Update the floor height and remove all dynamic voxels which might
+        // be part of the floor or some noise above the floor.
+        updateFloorHeight(updateResult.staticVoxelCenterPoints);
+        updateFloorHeight(updateResult.dynamicVoxelCenterPoints);
+
+        dynamicObjectsOctree = voxelCenterPointsToOctree(removeFloorVoxels(updateResult.dynamicVoxelCenterPoints));
+    }
+    else
+    {
+        // Potential floor voxels should not be removed. The octree containing all dynamic voxels can directly be
+        // created from the dynamic voxel center points without any additional removal of certain voxels.
+        dynamicObjectsOctree = voxelCenterPointsToOctree(updateResult.dynamicVoxelCenterPoints);
+    }
 
     // Cluster all dynamic voxels.
     dynamicObjectsOctree->expand();
@@ -205,7 +228,7 @@ octomap::OcTree* SpatialMapper::pointCloudToOctree(const sensor_msgs::PointCloud
     return octree;
 }
 
-octomap::OcTree* SpatialMapper::filterOctree(octomap::OcTree* octreeToFilter)
+octomap::OcTree* SpatialMapper::filterOctreeFreespace(octomap::OcTree* octreeToFilter)
 {
     // The unfiltered octree needs to be expanded so that we can traverse all its leaves. This method assumes that the
     // given octree is already expanded (as we can therefore save some time by not expanding and pruning the same octree
@@ -433,6 +456,78 @@ StaticObjectsOctreeUpdateResult SpatialMapper::updateStaticObjectsOctree(octomap
     spatialMapMutex.unlock();
 
     return result;
+}
+
+void SpatialMapper::updateFloorHeight(std::vector<octomap::point3d> voxelCenterPoints)
+{
+    // Check if there is a voxel which is lower than the currently assumed floor height.
+    float potentialNewFloorHeight = floorHeight;
+    for (auto it = voxelCenterPoints.begin(); it != voxelCenterPoints.end(); it++)
+    {
+        float& voxelHeight = it->y();
+        if (voxelHeight < floorHeight)
+        {
+            potentialNewFloorHeight = voxelHeight;
+        }
+    }
+
+    if (potentialNewFloorHeight != floorHeight)
+    {
+        // There is at least one voxel which is lower than the currently assumed floor height. Verify that this is not
+        // an outlier caused by some sensor noise.
+        float rejectionHeightLower = potentialNewFloorHeight + leafSize - 1e-6;
+        float rejectionHeightUpper = potentialNewFloorHeight + leafSize * floorRemovalRelativeNoiseHeight + 1e-6;
+
+        int numVoxelsInPotentialNewFloorHeight = 0;
+        int numVoxelsInRejectionHeight = 0;
+
+        for (auto it = voxelCenterPoints.begin(); it != voxelCenterPoints.end(); it++)
+        {
+            float& voxelHeight = it->y();
+            if (voxelHeight < rejectionHeightLower)
+            {
+                numVoxelsInPotentialNewFloorHeight++;
+            }
+            else if (voxelHeight < rejectionHeightUpper)
+            {
+                numVoxelsInRejectionHeight++;
+            }
+        }
+
+        if (numVoxelsInPotentialNewFloorHeight > std::max(floorRemovalMinFloorVoxels, numVoxelsInRejectionHeight))
+        {
+            // There are more voxels on the new assumption of the floor height than there are voxels slightly above that
+            // newly assumed floor height. It is therefore safe to say that the new assumption was not caused by an
+            // outlier and that the old assumption must have been wrong. As the old assumption was wrong, we'll keep the
+            // new assumption until we're proven wrong (again) at some point in the future.
+            floorHeight = potentialNewFloorHeight;
+            ROS_INFO("Changed floor height assumption to %f", floorHeight);
+        }
+    }
+}
+
+std::vector<octomap::point3d> SpatialMapper::removeFloorVoxels(std::vector<octomap::point3d> voxelCenterPointsToFilter)
+{
+    std::vector<octomap::point3d> nonFloorVoxels;
+    float floorVoxelHeight = floorHeight + leafSize * floorRemovalRelativeNoiseHeight + 1e-6;
+    for (auto it = voxelCenterPointsToFilter.begin(); it != voxelCenterPointsToFilter.end(); it++)
+    {
+        float& voxelHeight = it->y();
+        if (voxelHeight > floorVoxelHeight)
+        {
+            nonFloorVoxels.push_back(*it);
+        }
+    }
+
+    int numFloorVoxels = voxelCenterPointsToFilter.size() - nonFloorVoxels.size();
+    if (numFloorVoxels >= floorRemovalMinFloorVoxels)
+    {
+        return nonFloorVoxels;
+    }
+    else
+    {
+        return voxelCenterPointsToFilter;
+    }
 }
 
 octomap::OcTree* SpatialMapper::voxelCenterPointsToOctree(std::vector<octomap::point3d> voxelCenterPoints)

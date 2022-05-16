@@ -112,7 +112,7 @@ private:
     octomap::OcTree* pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg);
 
     // Filters an octree (must be expanded) by removing all free voxels neighboring at least one unknown voxel.
-    octomap::OcTree* filterOctree(octomap::OcTree* octreeToFilter);
+    octomap::OcTree* filterOctreeFreespace(octomap::OcTree* octreeToFilter);
 
     // Compares each voxel of the new octree (must be expanded) with the old octree.
     std::vector<VoxelDiffInfo> calculateOctreeVoxelDiff(
@@ -123,6 +123,13 @@ private:
     // Updates the octree containing the global spatial map based on the information contained in the given octree (must
     // be expanded) with information obtained in the current frame.
     StaticObjectsOctreeUpdateResult updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree);
+
+    // Updates the floor height according to the given center points of occupied voxels. The floor is assumed to be at
+    // the height of the lowest voxels ever observed.
+    void updateFloorHeight(std::vector<octomap::point3d> voxelCenterPoints);
+
+    // Removes all voxels corresponding to the floor from the given voxel center points.
+    std::vector<octomap::point3d> removeFloorVoxels(std::vector<octomap::point3d> voxelCenterPointsToFilter);
 
     // Creates an octree where all voxels denoted by the given voxel center points are marked as occupied.
     octomap::OcTree* voxelCenterPointsToOctree(std::vector<octomap::point3d> voxelCenterPoints);
@@ -156,14 +163,19 @@ private:
     double leafSize;
     double maxRange;
 
-    // Switches and hyper parameters for octree filtering.
-    bool doOctreeFiltering;
+    // Switches and hyper parameters for octree freespace filtering.
+    bool doOctreeFreespaceFiltering;
     int octreeFilteringNeighborhoodSize;
     std::vector<octomap::point3d> octreeFilteringNeighborhood;
 
     // Hyper parameters for incorporating new octrees to the global spatial map.
     int numFreeObservationsBeforeVoxelRemoval;
     int numFramesBeforePossibleDynamicVoxelRemoval;
+
+    // Hyper parameters for floor removal in voxels of dynamic objects.
+    bool doFloorRemovalInDynamicObjects;
+    int floorRemovalMinFloorVoxels;
+    int floorRemovalRelativeNoiseHeight;
 
     // Hyper parameters for clustering dynamic voxels.
     double voxelClusteringRelativeClusterDistance;
@@ -180,6 +192,9 @@ private:
     // A list of voxels that may contain some movements.
     std::unordered_map<octomap::point3d, PossibleDynamicVoxelInfo> possibleDynamicVoxels;
     uint32_t dynamicVoxelsUpdateSequenceNumber;
+
+    // The currently estimated floor height.
+    float floorHeight = 10000.0;
 
     // A transform listener used for accessing the position.
     tf::TransformListener tfListener;

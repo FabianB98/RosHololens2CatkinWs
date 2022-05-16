@@ -6,14 +6,19 @@
 octomapLeafSize: 0.05
 octomapMaxRange: -1.0
 
-# Switches and hyper parameters for octree filtering.
-doOctreeFiltering: true
+# Switches and hyper parameters for octree freespace filtering.
+doOctreeFreespaceFiltering: true
 octreeFilteringNeighborhoodSize: 3
 
 # Hyper parameters for incorporating new octrees to the global spatial map.
 numFreeObservationsBeforeVoxelRemoval: 5
 numFramesBeforePossibleDynamicVoxelRemoval: 10
 
+# Hyper parameters for floor removal in voxels of dynamic objects.
+doFloorRemovalInDynamicVoxels: true
+floorRemovalMinFloorVoxels: 25
+floorRemovalRelativeNoiseHeight: 1
+
 # Hyper parameters for clustering dynamic voxels.
 voxelClusteringRelativeClusterDistance: 1.9
-voxelClusteringMinClusterSize: 10
+voxelClusteringMinClusterSize: 8  # With a leaf size of 5 cm each voxel holds a volume of 125cm³. A minimum cluster size of 8 results in a removal of all clusters smaller than 1000cm³ (or 1 liter).
