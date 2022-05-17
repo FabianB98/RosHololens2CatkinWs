@@ -1,5 +1,9 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#    Configuration file for the HoloLens 2.
+#    Configuration file for the HoloLens 2. 
+# 
+#    The point clouds generated using this configuration file will be more downsampled than with the default config
+#    file. Due to this, they will contain less points, thus lowering the computational load for this ROS node during
+#    outlier removal as well as for all ROS nodes processing the generated point clouds.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
@@ -12,7 +16,7 @@ medianFilterWindowSize: 3
 
 # Hyper parameters used for downsampling.
 doDownsampling: true
-downsamplingLeafSize: 0.01
+downsamplingLeafSize: 0.025
 
 # Hyper parameters used for outlier removal with a radius outlier removal filer.
 doOutlierRemovalRadius: false
@@ -27,7 +31,7 @@ outlierRemovalStdDeviationMultiplier: 0.5
 # Hyper parameters uesd for outlier removal by clustering and discarding too small clusters.
 doOutlierRemovalClustering: true
 outlierRemovalClusterTolerance: 0.08
-outlierRemovalMinClusterSize: 600
+outlierRemovalMinClusterSize: 500
 
 # Sensor intrinsics of the short throw depth sensor.
 shortThrowMinDepth: 0.1

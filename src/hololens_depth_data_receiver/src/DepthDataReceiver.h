@@ -37,6 +37,8 @@ public:
         ros::NodeHandle n, 
         const std::string shortThrowImageTopic = SHORT_THROW_IMAGE_TOPIC, 
         const std::string longThrowImageTopic = LONG_THROW_IMAGE_TOPIC,
+        const std::string shortThrowPointCloudCamSpaceUnfilteredTopic = SHORT_THROW_POINT_CLOUD_CAM_SPACE_UNFILTERED,
+        const std::string longThrowPointCloudCamSpaceUnfilteredTopic = LONG_THROW_POINT_CLOUD_CAM_SPACE_UNFILTERED,
         const std::string shortThrowPointCloudCamSpaceTopic = SHORT_THROW_POINT_CLOUD_CAM_SPACE,
         const std::string longThrowPointCloudCamSpaceTopic = LONG_THROW_POINT_CLOUD_CAM_SPACE,
         const std::string shortThrowPointCloudWorldSpaceTopic = SHORT_THROW_POINT_CLOUD_WORLD_SPACE,
@@ -64,6 +66,7 @@ private:
         const float maxReliableDepth,
         const float maxDepth,
         const ros::Publisher& imagePublisher,
+        const ros::Publisher& pointCloudCamSpaceUnfilteredPublisher,
         const ros::Publisher& pointCloudCamSpacePublisher,
         const ros::Publisher& pointCloudWorldSpacePublisher,
         uint32_t* sequenceNumber);
@@ -184,6 +187,8 @@ private:
     // ROS publishers.
     ros::Publisher shortThrowImagePublisher;
     ros::Publisher longThrowImagePublisher;
+    ros::Publisher shortThrowPointCloudCamSpaceUnfilteredPublisher;
+    ros::Publisher longThrowPointCloudCamSpaceUnfilteredPublisher;
     ros::Publisher shortThrowPointCloudCamSpacePublisher;
     ros::Publisher longThrowPointCloudCamSpacePublisher;
     ros::Publisher shortThrowPointCloudWorldSpacePublisher;

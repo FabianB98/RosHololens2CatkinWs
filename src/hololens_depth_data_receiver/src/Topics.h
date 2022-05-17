@@ -7,6 +7,9 @@
 #define SHORT_THROW_IMAGE_TOPIC "hololensShortThrowImage"
 #define LONG_THROW_IMAGE_TOPIC "hololensLongThrowImage"
 
+#define SHORT_THROW_POINT_CLOUD_CAM_SPACE_UNFILTERED "hololensShortThrowPointCloudCamSpaceUnfiltered"
+#define LONG_THROW_POINT_CLOUD_CAM_SPACE_UNFILTERED "hololensLongThrowPointCloudCamSpaceUnfiltered"
+
 #define SHORT_THROW_POINT_CLOUD_CAM_SPACE "hololensShortThrowPointCloudCamSpace"
 #define LONG_THROW_POINT_CLOUD_CAM_SPACE "hololensLongThrowPointCloudCamSpace"
 

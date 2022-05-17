@@ -120,6 +120,8 @@ DepthDataReceiver::DepthDataReceiver(
     ros::NodeHandle n, 
     const std::string shortThrowImageTopic, 
     const std::string longThrowImageTopic,
+    const std::string shortThrowPointCloudCamSpaceUnfilteredTopic,
+    const std::string longThrowPointCloudCamSpaceUnfilteredTopic,
     const std::string shortThrowPointCloudCamSpaceTopic,
     const std::string longThrowPointCloudCamSpaceTopic,
     const std::string shortThrowPointCloudWorldSpaceTopic,
@@ -172,6 +174,8 @@ DepthDataReceiver::DepthDataReceiver(
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(shortThrowImageTopic, 10);
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
+    shortThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceUnfilteredTopic, 10);
+    longThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceUnfilteredTopic, 10);
     shortThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceTopic, 10);
     longThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceTopic, 10);
     shortThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudWorldSpaceTopic, 10);
@@ -185,22 +189,20 @@ DepthDataReceiver::DepthDataReceiver(
 
 void DepthDataReceiver::handleShortThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg)
 {
-    ROS_INFO("Received a short throw depth frame!");
     if (useShortThrow)
         handleDepthFrame(msg, shortThrowDirections, shortThrowMinDepth, shortThrowMinReliableDepth,
                 shortThrowMaxReliableDepth, shortThrowMaxDepth, shortThrowImagePublisher,
-                shortThrowPointCloudCamSpacePublisher, shortThrowPointCloudWorldSpacePublisher,
-                &shortThrowSequenceNumber);
+                shortThrowPointCloudCamSpaceUnfilteredPublisher, shortThrowPointCloudCamSpacePublisher,
+                shortThrowPointCloudWorldSpacePublisher, &shortThrowSequenceNumber);
 }
 
 void DepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg)
 {
-    ROS_INFO("Received a long throw depth frame!");
     if (useLongThrow)
         handleDepthFrame(msg, longThrowDirections, longThrowMinDepth, longThrowMinReliableDepth, 
                 longThrowMaxReliableDepth, longThrowMaxDepth, longThrowImagePublisher, 
-                longThrowPointCloudCamSpacePublisher, longThrowPointCloudWorldSpacePublisher,
-                &longThrowSequenceNumber);
+                longThrowPointCloudCamSpaceUnfilteredPublisher, longThrowPointCloudCamSpacePublisher,
+                longThrowPointCloudWorldSpacePublisher, &longThrowSequenceNumber);
 }
 
 void DepthDataReceiver::handleShortThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg)
@@ -288,6 +290,7 @@ void DepthDataReceiver::handleDepthFrame(
     const float maxReliableDepth,
     const float maxDepth,
     const ros::Publisher& imagePublisher,
+    const ros::Publisher& pointCloudCamSpaceUnfilteredPublisher,
     const ros::Publisher& pointCloudCamSpacePublisher,
     const ros::Publisher& pointCloudWorldSpacePublisher,
     uint32_t* sequenceNumber)
@@ -305,6 +308,7 @@ void DepthDataReceiver::handleDepthFrame(
     // Calculate the point cloud (in camera space).
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = computePointCloudFromDepthMap(depthMap, pixelDirections,
             minReliableDepth, maxReliableDepth);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceUnfiltered = pointCloudCamSpace;
 
     // Downsample the point cloud to ensure that the point density is not too high.
     if (doDownsampling)
@@ -326,15 +330,14 @@ void DepthDataReceiver::handleDepthFrame(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
 
-    // TODO: Remove the following line of code later on...
-    ROS_INFO("Current frame consists of %zu points.", pointCloudCamSpace->size());
-
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     ros::Time time = ros::Time::now();
     publishHololensPosition(depthFrame, time);
     publishHololensCamToWorldTf(depthFrame, time);
     publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, time, minDepth, minReliableDepth,
             maxReliableDepth, maxDepth);
+    publishPointCloud(pointCloudCamSpaceUnfiltered, pointCloudCamSpaceUnfilteredPublisher, *sequenceNumber, time,
+            "hololens_cam");
     publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, time, "hololens_cam");
     publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, time, "hololens_world");
     sequenceNumber++;
