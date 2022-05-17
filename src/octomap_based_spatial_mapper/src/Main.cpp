@@ -7,8 +7,8 @@ int main(int argc, char **argv)
 
     ros::NodeHandle n;
 
-    ros::Subscriber shortThrowPointCloudSubscriber = n.subscribe(SHORT_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC, 10, pointCloudFrameCallback);
-    ros::Subscriber longThrowPointCloudSubscriber = n.subscribe(LONG_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC, 10, pointCloudFrameCallback);
+    ros::Subscriber shortThrowPointCloudSubscriber = n.subscribe(SHORT_THROW_POINT_CLOUD_FRAME_TOPIC, 10, pointCloudFrameCallback);
+    ros::Subscriber longThrowPointCloudSubscriber = n.subscribe(LONG_THROW_POINT_CLOUD_FRAME_TOPIC, 10, pointCloudFrameCallback);
 
     spatialMapper = new SpatialMapper(n);
 
@@ -20,7 +20,7 @@ int main(int argc, char **argv)
     delete spatialMapper;
 }
 
-void pointCloudFrameCallback(const sensor_msgs::PointCloud2ConstPtr& msg)
+void pointCloudFrameCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    spatialMapper->handlePointCloud(msg);
+    spatialMapper->handlePointCloudFrame(msg);
 }

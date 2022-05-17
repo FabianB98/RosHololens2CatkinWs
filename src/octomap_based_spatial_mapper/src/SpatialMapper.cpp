@@ -8,7 +8,6 @@
 
 // Hyper parameters for insertion of point clouds into the octree data structure.
 #define LEAF_SIZE 0.05  // The size of a voxel (in meters).
-#define MAX_RANGE -1.0  // The maximum range for how long individual beams are inserted into the octree data structure.
 
 // Switches and hyper parameters for octree freespace filtering.
 #define DO_OCTREE_FREESPACE_FILTERING true      // Whether free voxels at the borders of new octrees should be filtered.
@@ -39,7 +38,6 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
 
     // Initialize all switches and hyper parameters as specified by parameters (or their default value).
     n.param("octomapLeafSize", leafSize, LEAF_SIZE);
-    n.param("octomapMaxRange", maxRange, MAX_RANGE); // TODO: maxRange could be fetched from the hololens_depth_data_receiver package.
     n.param("doOctreeFreespaceFiltering", doOctreeFreespaceFiltering, DO_OCTREE_FREESPACE_FILTERING);
     n.param("octreeFilteringNeighborhoodSize", octreeFilteringNeighborhoodSize, OCTREE_FILTERING_NEIGHBORHOOD_SIZE);
     n.param("numFreeObservationsBeforeVoxelRemoval", numFreeObservationsBeforeVoxelRemoval, NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL);
@@ -135,9 +133,9 @@ SpatialMapper::~SpatialMapper()
     delete staticObjectsOctree;
 }
 
-void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg)
+void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    octomap::OcTree* currentFrameOctree = pointCloudToOctree(msg);
+    octomap::OcTree* currentFrameOctree = pointCloudFrameToOctree(msg);
     currentFrameOctree->expand();
 
     // Filter all free voxels at the edges of the new octree. This will ensure that we don't accidentally mark voxels
@@ -202,28 +200,23 @@ void SpatialMapper::handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg
     delete dynamicObjectClustersOctree;
 }
 
-octomap::OcTree* SpatialMapper::pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg)
+octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
+        const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    octomap::Pointcloud pointCloudOctomap = octomap::Pointcloud();
-    octomap::pointCloud2ToOctomap(*msg, pointCloudOctomap);
+    // Create an Octomap point cloud containing all points (including all artificial end points).
+    octomap::Pointcloud pointcloudOctomap = octomap::Pointcloud();
+    octomap::pointCloud2ToOctomap(msg->pointCloudWorldSpace, pointcloudOctomap);
 
-    // TODO: Sensor origin needs to be fetched from the hololens_depth_data_receiver package.
-    ros::Time pointCloudTimestamp = msg->header.stamp;
-    tf::StampedTransform transform;
-    try
-    {
-        tfListener.waitForTransform("hololens_world", "hololens_cam", pointCloudTimestamp, ros::Duration(3.0));
-        tfListener.lookupTransform("hololens_world", "hololens_cam", pointCloudTimestamp, transform);
-    }
-    catch (tf::TransformException ex)
-    {
-        ROS_ERROR("Couldn't fetch the HoloLens's position!");
-        ROS_ERROR("%s", ex.what());
-    }
-    octomap::point3d sensorOrigin(transform.getOrigin().x(), transform.getOrigin().y(), transform.getOrigin().z());
+    octomap::Pointcloud artificialEndpointsOctomap = octomap::Pointcloud();
+    octomap::pointCloud2ToOctomap(msg->artificialEndpointsWorldSpace, artificialEndpointsOctomap);
 
+    pointcloudOctomap.push_back(artificialEndpointsOctomap);
+
+    // Convert the point cloud to an octree.
+    octomap::point3d sensorOrigin
+        = octomap::point3d(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
     octomap::OcTree* octree = new octomap::OcTree(leafSize);
-    octree->insertPointCloud(pointCloudOctomap, sensorOrigin, maxRange);
+    octree->insertPointCloud(pointcloudOctomap, sensorOrigin, msg->maxReliableDepth);
 
     return octree;
 }

@@ -7,6 +7,7 @@
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 
 #include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
@@ -105,11 +106,11 @@ public:
     ~SpatialMapper();
 
     // Callbacks for handling the incoming point cloud frames.
-    void handlePointCloud(const sensor_msgs::PointCloud2ConstPtr& msg);
+    void handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
 private:
     // Converts a PCL point cloud to an Octomap OcTree.
-    octomap::OcTree* pointCloudToOctree(const sensor_msgs::PointCloud2ConstPtr& msg);
+    octomap::OcTree* pointCloudFrameToOctree(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
     // Filters an octree (must be expanded) by removing all free voxels neighboring at least one unknown voxel.
     octomap::OcTree* filterOctreeFreespace(octomap::OcTree* octreeToFilter);
@@ -161,7 +162,6 @@ private:
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
-    double maxRange;
 
     // Switches and hyper parameters for octree freespace filtering.
     bool doOctreeFreespaceFiltering;

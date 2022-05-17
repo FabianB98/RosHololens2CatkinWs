@@ -4,7 +4,6 @@
 
 # Hyper parameters for insertion of point clouds into the octree data structure.
 octomapLeafSize: 0.05
-octomapMaxRange: -1.0
 
 # Switches and hyper parameters for octree freespace filtering.
 doOctreeFreespaceFiltering: true

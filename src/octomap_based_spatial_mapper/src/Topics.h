@@ -1,5 +1,5 @@
-#define SHORT_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC "hololensShortThrowPointCloudWorldSpace"
-#define LONG_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC "hololensLongThrowPointCloudWorldSpace"
+#define SHORT_THROW_POINT_CLOUD_FRAME_TOPIC "hololensShortThrowPointCloudFrame"
+#define LONG_THROW_POINT_CLOUD_FRAME_TOPIC "hololensLongThrowPointCloudFrame"
 
 #define OCTOMAP_CURRENT_FRAME_TOPIC "octomapCurrentFrame"
 #define OCTOMAP_STATIC_OBJECTS_TOPIC "octomapStaticObjects"

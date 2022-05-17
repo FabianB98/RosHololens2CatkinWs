@@ -4,9 +4,10 @@
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 
 SpatialMapper* spatialMapper;
 
 int main(int argc, char **argv);
 
-void pointCloudFrameCallback(const sensor_msgs::PointCloud2ConstPtr& msg);
+void pointCloudFrameCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
