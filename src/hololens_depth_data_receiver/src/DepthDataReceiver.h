@@ -23,6 +23,8 @@
 #include "hololens_msgs/PixelDirections.h"
 #include "hololens_msgs/Point.h"
 
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
@@ -43,7 +45,13 @@ public:
         const std::string longThrowPointCloudCamSpaceTopic = LONG_THROW_POINT_CLOUD_CAM_SPACE,
         const std::string shortThrowPointCloudWorldSpaceTopic = SHORT_THROW_POINT_CLOUD_WORLD_SPACE,
         const std::string longThrowPointCloudWorldSpaceTopic = LONG_THROW_POINT_CLOUD_WORLD_SPACE,
-        const std::string hololensPositionTopic = HOLOLENS_POSITION_TOPIC);
+        const std::string shortThrowArtificialEndpointsCamSpaceTopic = SHORT_THROW_ARTIFICIAL_ENDPOINTS_CAM_SPACE,
+        const std::string longThrowArtificialEndpointsCamSpaceTopic = LONG_THROW_ARTIFICIAL_ENDPOINTS_CAM_SPACE,
+        const std::string shortThrowArtificialEndpointsWorldSpaceTopic = SHORT_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE,
+        const std::string longThrowArtificialEndpointsWorldSpaceTopic = LONG_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE,
+        const std::string hololensPositionTopic = HOLOLENS_POSITION_TOPIC,
+        const std::string shortThrowPointCloudFrameTopic = SHORT_THROW_POINT_CLOUD_FRAME,
+        const std::string longThrowPointCloudFrameTopic = LONG_THROW_POINT_CLOUD_FRAME);
 
     // Callbacks for handling the incoming depth frames and pixel directions.
     void handleShortThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg);
@@ -69,17 +77,22 @@ private:
         const ros::Publisher& pointCloudCamSpaceUnfilteredPublisher,
         const ros::Publisher& pointCloudCamSpacePublisher,
         const ros::Publisher& pointCloudWorldSpacePublisher,
+        const ros::Publisher& artificialEndpointsCamSpacePublisher,
+        const ros::Publisher& artificialEndpointsWorldSpacePublisher,
+        const ros::Publisher& pointCloudFramePublisher,
         uint32_t* sequenceNumber);
 
     // Applies a median filter onto a given depth map.
     void applyMedianFilter(DepthMap& depthMap);
 
     // Computes a point cloud (in camera space) from a given depth map.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr computePointCloudFromDepthMap(
-        const DepthMap depthMap, 
+    std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> computePointCloudFromDepthMap(
+        const DepthMap depthMap,
         const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
+        const float minDepth,
         const float minReliableDepth,
-        const float maxReliableDepth);
+        const float maxReliableDepth,
+        const float maxDepth);
 
     // Computes the transformation matrix for transforming from camera space to world space.
     Eigen::Matrix4f computeCamToWorldFromDepthFrame(
@@ -109,12 +122,24 @@ private:
         const int minClusterSize);
 
     // Methods for publishing the results.
+    void pointCloudToMsg(
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+        sensor_msgs::PointCloud2& message,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const std::string frameId);
     void publishPointCloud(
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
         const ros::Publisher& publisher,
         uint32_t sequenceNumber,
         const ros::Time& timestamp,
         const std::string frameId);
+    void publishPointCloudFrame(
+        const ros::Publisher& publisher,
+        sensor_msgs::PointCloud2& pointCloudWorldSpaceMsg,
+        sensor_msgs::PointCloud2& artificialEndpointsWorldSpaceMsg,
+        const hololens_msgs::DepthFrame::ConstPtr& depthFrame,
+        const float maxReliableDepth);
     void publishHololensPosition(const hololens_msgs::DepthFrame::ConstPtr& depthFrame, const ros::Time& timestamp);
     void publishHololensCamToWorldTf(const hololens_msgs::DepthFrame::ConstPtr& depthFrame, const ros::Time& timestamp);
     void publishDepthImage(
@@ -138,6 +163,16 @@ private:
     bool doOutlierRemovalRadius;
     bool doOutlierRemovalStatistical;
     bool doOutlierRemovalClustering;
+
+    // Switches indicating which results should be published.
+    bool doPublishDepthImage;
+    bool doPublishPointCloudCamSpaceUnfiltered;
+    bool doPublishPointCloudCamSpace;
+    bool doPublishPointCloudWorldSpace;
+    bool doPublishArtificialEndpointsCamSpace;
+    bool doPublishArtificialEndpointsWorldSpace;
+    bool doPublishHololensPosition;
+    bool doPublishPointCloudFrame;
 
     // Hyper parameters used for median filtering.
     int medianFilterWindowSize;
@@ -193,7 +228,13 @@ private:
     ros::Publisher longThrowPointCloudCamSpacePublisher;
     ros::Publisher shortThrowPointCloudWorldSpacePublisher;
     ros::Publisher longThrowPointCloudWorldSpacePublisher;
+    ros::Publisher shortThrowArtificialEndpointsCamSpacePublisher;
+    ros::Publisher longThrowArtificialEndpointsCamSpacePublisher;
+    ros::Publisher shortThrowArtificialEndpointsWorldSpacePublisher;
+    ros::Publisher longThrowArtificialEndpointsWorldSpacePublisher;
     ros::Publisher hololensPositionPublisher;
+    ros::Publisher shortThrowPointCloudFramePublisher;
+    ros::Publisher longThrowPointCloudFramePublisher;
     tf::TransformBroadcaster hololensCamPublisher;
 
     // Sequence numbers used for publishing the results.

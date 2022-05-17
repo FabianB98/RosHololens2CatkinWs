@@ -36,7 +36,7 @@ shortThrowMaxReliableDepth: 1.0
 shortThrowMaxDepth: 1.0
 
 # Sensor intrinsics of the long throw depth sensor.
-longThrowMinDepth: 0.1
+longThrowMinDepth: 0.2
 longThrowMinReliableDepth: 0.75 # While the sensor generally seems to provide reliable values even for values below 0.75 meters, there are sometimes a lot of ghost points in that range.
 longThrowMaxReliableDepth: 8.0  # Sometimes objects are reported as being closer than they actually are for depth values above ~8.0 meters.
 longThrowMaxDepth: 16.0

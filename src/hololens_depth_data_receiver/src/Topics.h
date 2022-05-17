@@ -16,4 +16,13 @@
 #define SHORT_THROW_POINT_CLOUD_WORLD_SPACE "hololensShortThrowPointCloudWorldSpace"
 #define LONG_THROW_POINT_CLOUD_WORLD_SPACE "hololensLongThrowPointCloudWorldSpace"
 
+#define SHORT_THROW_ARTIFICIAL_ENDPOINTS_CAM_SPACE "hololensShortThrowArtificialEndpointsCamSpace"
+#define LONG_THROW_ARTIFICIAL_ENDPOINTS_CAM_SPACE "hololensLongThrowArtificialEndpointsCamSpace"
+
+#define SHORT_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE "hololensShortThrowArtificialEndpointsWorldSpace"
+#define LONG_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE "hololensLongThrowArtificialEndpointsWorldSpace"
+
 #define HOLOLENS_POSITION_TOPIC "hololensPosition"
+
+#define SHORT_THROW_POINT_CLOUD_FRAME "hololensShortThrowPointCloudFrame"
+#define LONG_THROW_POINT_CLOUD_FRAME "hololensLongThrowPointCloudFrame"

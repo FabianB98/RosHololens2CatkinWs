@@ -1,0 +1,12 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Default configuration file for which results should be published.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+doPublishDepthImage: true
+doPublishPointCloudCamSpaceUnfiltered: false
+doPublishPointCloudCamSpace: false
+doPublishPointCloudWorldSpace: true
+doPublishArtificialEndpointsCamSpace: false
+doPublishArtificialEndpointsWorldSpace: true
+doPublishHololensPosition: true
+doPublishCombinedData: true

@@ -47,6 +47,24 @@
 // Should outliers be removed from new point clouds by clustering the point cloud and discarding all small clusters?
 #define REMOVE_OUTLIERS_CLUSTERING false
 
+// Switches indicating which results should be published.
+// Should the reconstructed and colorized depth image be published?
+#define DO_PUBLISH_DEPTH_IMAGE true
+// Should the (almost) unfiltered point cloud (in cam space) be published?
+#define DO_PUBLISH_POINT_CLOUD_CAM_SPACE_UNFILTERED false
+// Should the filtered point cloud (in cam space) be published?
+#define DO_PUBLISH_POINT_CLOUD_CAM_SPACE false
+// Should the filtered point cloud (in world space) be published?
+#define DO_PUBLISH_POINT_CLOUD_WORLD_SPACE true
+// Should the artificial endpoints (in cam space) be published?
+#define DO_PUBLISH_ARTIFICIAL_ENDPOINTS_CAM_SPACE false
+// Should the artificial endpoints (in world space) be published?
+#define DO_PUBLISH_ARTIFICIAL_ENDPOINTS_WORLD_SPACE true
+// Should the HoloLens's position be published?
+#define DO_PUBLISH_HOLOLENS_POSITION true
+// Should all world space data (point cloud, artificial endpoints, position) be published as a PointCloudFrame message?
+#define DO_PUBLISH_POINT_CLOUD_FRAME true
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                  DEFAULT HYPER PARAMETERS FOR THE USED ALGORITHMS                                  //
@@ -126,7 +144,13 @@ DepthDataReceiver::DepthDataReceiver(
     const std::string longThrowPointCloudCamSpaceTopic,
     const std::string shortThrowPointCloudWorldSpaceTopic,
     const std::string longThrowPointCloudWorldSpaceTopic,
-    const std::string hololensPositionTopic)
+    const std::string shortThrowArtificialEndpointsCamSpaceTopic,
+    const std::string longThrowArtificialEndpointsCamSpaceTopic,
+    const std::string shortThrowArtificialEndpointsWorldSpaceTopic,
+    const std::string longThrowArtificialEndpointsWorldSpaceTopic,
+    const std::string hololensPositionTopic,
+    const std::string shortThrowPointCloudFrameTopic,
+    const std::string longThrowPointCloudFrameTopic)
 {
     ROS_INFO("Creating DepthDataReceiver...");
 
@@ -138,6 +162,14 @@ DepthDataReceiver::DepthDataReceiver(
     n.param("doOutlierRemovalRadius", doOutlierRemovalRadius, REMOVE_OUTLIERS_RADIUS);
     n.param("doOutlierRemovalStatistical", doOutlierRemovalStatistical, REMOVE_OUTLIERS_STATISTICAL);
     n.param("doOutlierRemovalClustering", doOutlierRemovalClustering, REMOVE_OUTLIERS_CLUSTERING);
+    n.param("doPublishDepthImage", doPublishDepthImage, DO_PUBLISH_DEPTH_IMAGE);
+    n.param("doPublishPointCloudCamSpaceUnfiltered", doPublishPointCloudCamSpaceUnfiltered, DO_PUBLISH_POINT_CLOUD_CAM_SPACE_UNFILTERED);
+    n.param("doPublishPointCloudCamSpace", doPublishPointCloudCamSpace, DO_PUBLISH_POINT_CLOUD_CAM_SPACE);
+    n.param("doPublishPointCloudWorldSpace", doPublishPointCloudWorldSpace, DO_PUBLISH_POINT_CLOUD_WORLD_SPACE);
+    n.param("doPublishArtificialEndpointsCamSpace", doPublishArtificialEndpointsCamSpace, DO_PUBLISH_ARTIFICIAL_ENDPOINTS_CAM_SPACE);
+    n.param("doPublishArtificialEndpointsWorldSpace", doPublishArtificialEndpointsWorldSpace, DO_PUBLISH_ARTIFICIAL_ENDPOINTS_WORLD_SPACE);
+    n.param("doPublishHololensPosition", doPublishHololensPosition, DO_PUBLISH_HOLOLENS_POSITION);
+    n.param("doPublishPointCloudFrame", doPublishPointCloudFrame, DO_PUBLISH_POINT_CLOUD_FRAME);
 
     // Initialize all hyper parameters as specified by parameters (or their default value).
     n.param("medianFilterWindowSize", medianFilterWindowSize, MEDIAN_FILTER_WINDOW_SIZE);
@@ -172,15 +204,45 @@ DepthDataReceiver::DepthDataReceiver(
     n.param("noisyPixelRemovalCircleRadius", noisyPixelRemovalCircleRadius, NOISY_PIXEL_REMOVAL_CIRCLE_RADIUS);
 
     // Advertise the topics to which the raw depth images (short throw & long throw) will be published.
-    shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(shortThrowImageTopic, 10);
-    longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
-    shortThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceUnfilteredTopic, 10);
-    longThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceUnfilteredTopic, 10);
-    shortThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceTopic, 10);
-    longThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceTopic, 10);
-    shortThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudWorldSpaceTopic, 10);
-    longThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudWorldSpaceTopic, 10);
-    hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(hololensPositionTopic, 10);
+    if (doPublishDepthImage)
+    {
+        shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(shortThrowImageTopic, 10);
+        longThrowImagePublisher = n.advertise<sensor_msgs::Image>(longThrowImageTopic, 10);
+    }
+    if (doPublishPointCloudCamSpaceUnfiltered)
+    {
+        shortThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceUnfilteredTopic, 10);
+        longThrowPointCloudCamSpaceUnfilteredPublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceUnfilteredTopic, 10);
+    }
+    if (doPublishPointCloudCamSpace)
+    {
+        shortThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudCamSpaceTopic, 10);
+        longThrowPointCloudCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudCamSpaceTopic, 10);
+    }
+    if (doPublishPointCloudWorldSpace)
+    {
+        shortThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowPointCloudWorldSpaceTopic, 10);
+        longThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowPointCloudWorldSpaceTopic, 10);
+    }
+    if (doPublishArtificialEndpointsCamSpace)
+    {
+        shortThrowArtificialEndpointsCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowArtificialEndpointsCamSpaceTopic, 10);
+        longThrowArtificialEndpointsCamSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowArtificialEndpointsCamSpaceTopic, 10);
+    }
+    if (doPublishArtificialEndpointsWorldSpace)
+    {
+        shortThrowArtificialEndpointsWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(shortThrowArtificialEndpointsWorldSpaceTopic, 10);
+        longThrowArtificialEndpointsWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(longThrowArtificialEndpointsWorldSpaceTopic, 10);
+    }
+    if (doPublishHololensPosition)
+    {
+        hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(hololensPositionTopic, 10);
+    }
+    if (doPublishPointCloudFrame)
+    {
+        shortThrowPointCloudFramePublisher = n.advertise<hololens_depth_data_receiver_msgs::PointCloudFrame>(shortThrowPointCloudFrameTopic, 10);
+        longThrowPointCloudFramePublisher = n.advertise<hololens_depth_data_receiver_msgs::PointCloudFrame>(longThrowPointCloudFrameTopic, 10);
+    }
 
     // Initialize the pixel directions to an empty array each.
     shortThrowDirections = hololens_msgs::PixelDirections::Ptr(new hololens_msgs::PixelDirections());
@@ -193,7 +255,9 @@ void DepthDataReceiver::handleShortThrowDepthFrame(const hololens_msgs::DepthFra
         handleDepthFrame(msg, shortThrowDirections, shortThrowMinDepth, shortThrowMinReliableDepth,
                 shortThrowMaxReliableDepth, shortThrowMaxDepth, shortThrowImagePublisher,
                 shortThrowPointCloudCamSpaceUnfilteredPublisher, shortThrowPointCloudCamSpacePublisher,
-                shortThrowPointCloudWorldSpacePublisher, &shortThrowSequenceNumber);
+                shortThrowPointCloudWorldSpacePublisher, shortThrowArtificialEndpointsCamSpacePublisher,
+                shortThrowArtificialEndpointsWorldSpacePublisher, shortThrowPointCloudFramePublisher,
+                &shortThrowSequenceNumber);
 }
 
 void DepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg)
@@ -202,7 +266,9 @@ void DepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::DepthFram
         handleDepthFrame(msg, longThrowDirections, longThrowMinDepth, longThrowMinReliableDepth, 
                 longThrowMaxReliableDepth, longThrowMaxDepth, longThrowImagePublisher, 
                 longThrowPointCloudCamSpaceUnfilteredPublisher, longThrowPointCloudCamSpacePublisher,
-                longThrowPointCloudWorldSpacePublisher, &longThrowSequenceNumber);
+                longThrowPointCloudWorldSpacePublisher, longThrowArtificialEndpointsCamSpacePublisher,
+                longThrowArtificialEndpointsWorldSpacePublisher, longThrowPointCloudFramePublisher,
+                &longThrowSequenceNumber);
 }
 
 void DepthDataReceiver::handleShortThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg)
@@ -293,6 +359,9 @@ void DepthDataReceiver::handleDepthFrame(
     const ros::Publisher& pointCloudCamSpaceUnfilteredPublisher,
     const ros::Publisher& pointCloudCamSpacePublisher,
     const ros::Publisher& pointCloudWorldSpacePublisher,
+    const ros::Publisher& artificialEndpointsCamSpacePublisher,
+    const ros::Publisher& artificialEndpointsWorldSpacePublisher,
+    const ros::Publisher& pointCloudFramePublisher,
     uint32_t* sequenceNumber)
 {
     // Decode the depth map.
@@ -306,9 +375,11 @@ void DepthDataReceiver::handleDepthFrame(
         applyMedianFilter(depthMap);
 
     // Calculate the point cloud (in camera space).
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = computePointCloudFromDepthMap(depthMap, pixelDirections,
-            minReliableDepth, maxReliableDepth);
+    std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> clouds = computePointCloudFromDepthMap(
+            depthMap, pixelDirections, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = clouds.first;
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpaceUnfiltered = pointCloudCamSpace;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr artificialEndpointsCamSpace = clouds.second;
 
     // Downsample the point cloud to ensure that the point density is not too high.
     if (doDownsampling)
@@ -316,30 +387,85 @@ void DepthDataReceiver::handleDepthFrame(
 
     // Remove outliers (measurement errors, extremely noisy values, ...) from the point cloud.
     if (doOutlierRemovalRadius)
-        pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch, 
+    {
+        pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch,
                 outlierRemovalMinNeighborsInRadius);
+        artificialEndpointsCamSpace = removeOutliersRadius(artificialEndpointsCamSpace, outlierRemovalRadiusSearch,
+                outlierRemovalMinNeighborsInRadius);
+    }
     if (doOutlierRemovalStatistical)
-        pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck, 
+    {
+        pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck,
                 outlierRemovalStdDeviationMultiplier);
+        artificialEndpointsCamSpace = removeOutliersStatistical(artificialEndpointsCamSpace,
+                outlierRemovalNeighborsToCheck, outlierRemovalStdDeviationMultiplier);
+    }
     if (doOutlierRemovalClustering)
+    {
         pointCloudCamSpace = removeOutliersClustering(pointCloudCamSpace, outlierRemovalClusterTolerance,
                 outlierRemovalMinClusterSize);
+        artificialEndpointsCamSpace = removeOutliersClustering(artificialEndpointsCamSpace,
+                outlierRemovalClusterTolerance, outlierRemovalMinClusterSize);
+    }
 
     // Calculate the transformation from camera space to world space and transform the point cloud.
     Eigen::Matrix4f camToWorld = computeCamToWorldFromDepthFrame(depthFrame);
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::transformPointCloud(*artificialEndpointsCamSpace, *artificialEndpointsWorldSpace, camToWorld);
 
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
+    // TODO: This block of code is a total mess and needs to be tidied up.
     ros::Time time = ros::Time::now();
-    publishHololensPosition(depthFrame, time);
+    sensor_msgs::PointCloud2 pointCloudWorldSpaceMsg;
+    if (doPublishPointCloudWorldSpace || doPublishPointCloudFrame)
+    {
+        pointCloudToMsg(pointCloudWorldSpace, pointCloudWorldSpaceMsg, *sequenceNumber, time, "hololens_world");
+    }
+    sensor_msgs::PointCloud2 artificialEndpointsWorldSpaceMsg;
+    if (doPublishArtificialEndpointsWorldSpace || doPublishPointCloudFrame)
+    {
+        pointCloudToMsg(artificialEndpointsWorldSpace, artificialEndpointsWorldSpaceMsg, *sequenceNumber, time,
+                "hololens_world");
+    }
+    if (doPublishHololensPosition)
+    {
+        publishHololensPosition(depthFrame, time);
+    }
     publishHololensCamToWorldTf(depthFrame, time);
-    publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, time, minDepth, minReliableDepth,
-            maxReliableDepth, maxDepth);
-    publishPointCloud(pointCloudCamSpaceUnfiltered, pointCloudCamSpaceUnfilteredPublisher, *sequenceNumber, time,
-            "hololens_cam");
-    publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, time, "hololens_cam");
-    publishPointCloud(pointCloudWorldSpace, pointCloudWorldSpacePublisher, *sequenceNumber, time, "hololens_world");
+    if (doPublishDepthImage)
+    {
+        publishDepthImage(depthMap, pixelDirections, imagePublisher, *sequenceNumber, time, minDepth, minReliableDepth,
+                maxReliableDepth, maxDepth);
+    }
+    if (doPublishPointCloudCamSpaceUnfiltered)
+    {
+        publishPointCloud(pointCloudCamSpaceUnfiltered, pointCloudCamSpaceUnfilteredPublisher, *sequenceNumber, time,
+                "hololens_cam");
+    }
+    if (doPublishPointCloudCamSpace)
+    {
+        publishPointCloud(pointCloudCamSpace, pointCloudCamSpacePublisher, *sequenceNumber, time, "hololens_cam");
+    }
+    if (doPublishPointCloudWorldSpace)
+    {
+        pointCloudWorldSpacePublisher.publish(pointCloudWorldSpaceMsg);
+    }
+    if (doPublishArtificialEndpointsCamSpace)
+    {
+        publishPointCloud(artificialEndpointsCamSpace, artificialEndpointsCamSpacePublisher, *sequenceNumber, time,
+                "hololens_cam");
+    }
+    if (doPublishArtificialEndpointsWorldSpace)
+    {
+        artificialEndpointsWorldSpacePublisher.publish(artificialEndpointsWorldSpaceMsg);
+    }
+    if (doPublishPointCloudFrame)
+    {
+        publishPointCloudFrame(pointCloudFramePublisher, pointCloudWorldSpaceMsg, artificialEndpointsWorldSpaceMsg,
+                depthFrame, maxReliableDepth);
+    }
     sequenceNumber++;
 }
 
@@ -380,14 +506,17 @@ void DepthDataReceiver::applyMedianFilter(DepthMap& depthMap)
     }
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::computePointCloudFromDepthMap(
-    const DepthMap depthMap, 
+std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::Ptr> DepthDataReceiver::computePointCloudFromDepthMap(
+    const DepthMap depthMap,
     const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
+    const float minDepth,
     const float minReliableDepth,
-    const float maxReliableDepth)
+    const float maxReliableDepth,
+    const float maxDepth)
 {
     // Create a point cloud in which we will store the results.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::PointCloud<pcl::PointXYZ>::Ptr artificialEndpoints (new pcl::PointCloud<pcl::PointXYZ>());
     
     // Iterate over each pixel of the depth frame.
     for (uint32_t i = 0; i < pixelDirections->pixelDirections.size(); ++i)
@@ -397,17 +526,24 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::computePointCloudFromDept
         uint32_t pixelValue = depthMap.valueAt(dir.u, dir.v);
         float depth = static_cast<float>(pixelValue) / 1000.0f;
 
-        // Skip pixels whose depth value are not within the reliable depth range.
-        if (depth < minReliableDepth || depth > maxReliableDepth)
+        // Skip pixels whose depth values are not within the reliable depth range. Pixels with a depth below minDepth
+        // will be mapped to maxDepth to ensure that the artificial end points are not directly in front of the sensor,
+        // but far away enough to ensure that their artificial end point is further away than maxReliableDepth.
+        if (depth <= minDepth)
+            depth = maxDepth;
+        else if (depth < minReliableDepth)
             continue;
 
         // Calculate the point for the current pixel based on the pixels depth value.
-        pointCloudCamSpace->push_back(
-                pcl::PointXYZ(dir.direction.x * depth, dir.direction.y * depth, dir.direction.z * depth));
+        pcl::PointXYZ point = pcl::PointXYZ(dir.direction.x * depth, dir.direction.y * depth, dir.direction.z * depth);
+        if (minReliableDepth <= depth && depth <= maxReliableDepth)
+            pointCloudCamSpace->push_back(point);
+        else
+            artificialEndpoints->push_back(point);
     }
 
     // Return the calculated point cloud.
-    return pointCloudCamSpace;
+    return std::make_pair(pointCloudCamSpace, artificialEndpoints);
 }
 
 Eigen::Matrix4f DepthDataReceiver::computeCamToWorldFromDepthFrame(
@@ -527,6 +663,22 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::removeOutliersClustering(
     return filteredPointCloud;
 }
 
+void DepthDataReceiver::pointCloudToMsg(
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+    sensor_msgs::PointCloud2& message,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
+{
+    // Create the ROS message for the point cloud and store the point cloud inside it.
+    pcl::toROSMsg(*cloud, message);
+
+    // Set the header of the message.
+    message.header.seq = sequenceNumber;
+    message.header.stamp = timestamp;
+    message.header.frame_id = frameId;
+}
+
 void DepthDataReceiver::publishPointCloud(
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
     const ros::Publisher& publisher,
@@ -534,17 +686,32 @@ void DepthDataReceiver::publishPointCloud(
     const ros::Time& timestamp,
     const std::string frameId)
 {
-    // Create the ROS message for the point cloud and store the point cloud inside it.
     sensor_msgs::PointCloud2 pointCloudMessage;
-    pcl::toROSMsg(*cloud, pointCloudMessage);
+    pointCloudToMsg(cloud, pointCloudMessage, sequenceNumber, timestamp, frameId);
 
-    // Set the header of the message.
-    pointCloudMessage.header.seq = sequenceNumber;
-    pointCloudMessage.header.stamp = timestamp;
-    pointCloudMessage.header.frame_id = frameId;
-
-    // Publish the message.
     publisher.publish(pointCloudMessage);
+}
+
+void DepthDataReceiver::publishPointCloudFrame(
+    const ros::Publisher& publisher,
+    sensor_msgs::PointCloud2& pointCloudWorldSpaceMsg,
+    sensor_msgs::PointCloud2& artificialEndpointsWorldSpaceMsg,
+    const hololens_msgs::DepthFrame::ConstPtr& depthFrame,
+    const float maxReliableDepth)
+{
+    hololens_depth_data_receiver_msgs::PointCloudFrame pointCloudFrame;
+
+    pointCloudFrame.hololensPosition.header = pointCloudWorldSpaceMsg.header;
+    pointCloudFrame.hololensPosition.point.x = depthFrame->camToWorldTranslation.x;
+    pointCloudFrame.hololensPosition.point.y = depthFrame->camToWorldTranslation.y;
+    pointCloudFrame.hololensPosition.point.z = depthFrame->camToWorldTranslation.z;
+
+    pointCloudFrame.pointCloudWorldSpace = pointCloudWorldSpaceMsg;
+    pointCloudFrame.artificialEndpointsWorldSpace = artificialEndpointsWorldSpaceMsg;
+
+    pointCloudFrame.maxReliableDepth = maxReliableDepth;
+
+    publisher.publish(pointCloudFrame);
 }
 
 void DepthDataReceiver::publishHololensPosition(

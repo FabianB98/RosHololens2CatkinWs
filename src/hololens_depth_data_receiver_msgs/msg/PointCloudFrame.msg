@@ -1,0 +1,6 @@
+geometry_msgs/PointStamped hololensPosition
+
+sensor_msgs/PointCloud2 pointCloudWorldSpace
+sensor_msgs/PointCloud2 artificialEndpointsWorldSpace
+
+float32 maxReliableDepth
