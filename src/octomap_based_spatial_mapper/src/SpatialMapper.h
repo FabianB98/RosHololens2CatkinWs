@@ -109,6 +109,9 @@ public:
     void handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
 private:
+    // Initializes a voxel neighborhood based on the euclidean distance to the centermost voxel.
+    std::vector<octomap::point3d> initializeEuclideanDistanceNeighborhood(double relativeNeighborDistance);
+
     // Converts a PCL point cloud to an Octomap OcTree.
     octomap::OcTree* pointCloudFrameToOctree(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
@@ -162,10 +165,12 @@ private:
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
+    bool octreeInsertionLazyEval;
+    bool octreeInsertionDiscretize;
 
     // Switches and hyper parameters for octree freespace filtering.
     bool doOctreeFreespaceFiltering;
-    int octreeFilteringNeighborhoodSize;
+    double octreeFilteringRelativeNeighborDistance;
     std::vector<octomap::point3d> octreeFilteringNeighborhood;
 
     // Hyper parameters for incorporating new octrees to the global spatial map.

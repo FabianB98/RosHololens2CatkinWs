@@ -1,0 +1,28 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Configuration file containing parameters for the octomap based spatial mapper which were optimized to reduce
+#    the total computational load in order to make everything run on an i7 4790K with a decent time performance.
+#    However, the results produced using this configuration are worse than the results produced using the default
+#    configuration.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Hyper parameters for insertion of point clouds into the octree data structure.
+octomapLeafSize: 0.10           # Voxels now have an edge length of 10 cm instead of 5 cm.
+octreeInsertionLazyEval: true   # This should speed up conversion of point clouds to octrees.
+octreeInsertionDiscretize: true # This should speed up conversion of point clouds to octrees at the cost of producing slightly different results.
+
+# Switches and hyper parameters for octree freespace filtering.
+doOctreeFreespaceFiltering: true
+octreeFilteringRelativeNeighborDistance: 1.25 # Check less neighbors during freespace filtering than the default configuration.
+
+# Hyper parameters for incorporating new octrees to the global spatial map.
+numFreeObservationsBeforeVoxelRemoval: 5
+numFramesBeforePossibleDynamicVoxelRemoval: 10
+
+# Hyper parameters for floor removal in voxels of dynamic objects.
+doFloorRemovalInDynamicVoxels: true
+floorRemovalMinFloorVoxels: 25
+floorRemovalRelativeNoiseHeight: 1
+
+# Hyper parameters for clustering dynamic voxels.
+voxelClusteringRelativeClusterDistance: 1.9
+voxelClusteringMinClusterSize: 5  # With a leaf size of 10 cm each voxel holds a volume of 1000cm³ (or 1 liter). However, keeping clusters with only a single voxel would produce too much noise. This results in required clusters to be larger than what would be required using the default configuration.

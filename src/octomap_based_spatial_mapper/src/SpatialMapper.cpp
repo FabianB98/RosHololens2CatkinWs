@@ -7,11 +7,13 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
 // Hyper parameters for insertion of point clouds into the octree data structure.
-#define LEAF_SIZE 0.05  // The size of a voxel (in meters).
+#define LEAF_SIZE 0.05                      // The size of a voxel (in meters).
+#define OCTREE_INSERTION_LAZY_EVAL false    // Whether inner nodes are only updated after the point cloud was inserted.
+#define OCTREE_INSERTION_DISCRETIZE false   // Whether the point cloud is discretized into octree key cells.
 
 // Switches and hyper parameters for octree freespace filtering.
-#define DO_OCTREE_FREESPACE_FILTERING true      // Whether free voxels at the borders of new octrees should be filtered.
-#define OCTREE_FILTERING_NEIGHBORHOOD_SIZE 3    // The size of the neighborhood to check when filtering octrees.
+#define DO_OCTREE_FREESPACE_FILTERING true              // Whether free voxels at the borders of octrees should be filtered.
+#define OCTREE_FILTERING_RELATIVE_NEIGHBOR_DISTANCE 1.5 // The distance to neighboring voxels relative to leaf size.
 
 // Hyper parameters for incorporating new octrees to the global spatial map.
 #define NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL 5        // Mark occupied voxel as free after this many free observations.
@@ -38,8 +40,10 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
 
     // Initialize all switches and hyper parameters as specified by parameters (or their default value).
     n.param("octomapLeafSize", leafSize, LEAF_SIZE);
+    n.param("octreeInsertionLazyEval", octreeInsertionLazyEval, OCTREE_INSERTION_LAZY_EVAL);
+    n.param("octreeInsertionDiscretize", octreeInsertionDiscretize, OCTREE_INSERTION_DISCRETIZE);
     n.param("doOctreeFreespaceFiltering", doOctreeFreespaceFiltering, DO_OCTREE_FREESPACE_FILTERING);
-    n.param("octreeFilteringNeighborhoodSize", octreeFilteringNeighborhoodSize, OCTREE_FILTERING_NEIGHBORHOOD_SIZE);
+    n.param("octreeFilteringRelativeNeighborDistance", octreeFilteringRelativeNeighborDistance, OCTREE_FILTERING_RELATIVE_NEIGHBOR_DISTANCE);
     n.param("numFreeObservationsBeforeVoxelRemoval", numFreeObservationsBeforeVoxelRemoval, NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL);
     n.param("numFramesBeforePossibleDynamicVoxelRemoval", numFramesBeforePossibleDynamicVoxelRemoval, NUM_FRAMES_BEFORE_POSSIBLE_DYNAMIC_VOXEL_REMOVAL);
     n.param("doFloorRemovalInDynamicObjects", doFloorRemovalInDynamicObjects, DO_FLOOR_REMOVAL_IN_DYNAMIC_VOXELS);
@@ -48,49 +52,9 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("voxelClusteringRelativeClusterDistance", voxelClusteringRelativeClusterDistance, VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE);
     n.param("voxelClusteringMinClusterSize", voxelClusteringMinClusterSize, VOXEL_CLUSTERING_MIN_CLUSTER_SIZE);
 
-    // Initialize the array of the neighborhood to check when filtering voxels.
-    int halfNeighborhoodSize = octreeFilteringNeighborhoodSize / 2;
-    for (int x = -halfNeighborhoodSize; x <= halfNeighborhoodSize; x++)
-    {
-        for (int y = -halfNeighborhoodSize; y <= halfNeighborhoodSize; y++)
-        {
-            for (int z = -halfNeighborhoodSize; z <= halfNeighborhoodSize; z++)
-            {
-                // Don't add the centermost voxel (i.e. (0, 0, 0)) to its neighborhood.
-                if (x != 0 || y != 0 || z != 0)
-                {
-                    octreeFilteringNeighborhood.push_back(octomap::point3d(x * leafSize, y * leafSize, z * leafSize));
-                }
-            }
-        }
-    }
-
-    // Initialize the array of the neighborhood to check when clustering voxels.
-    double clusterDistance = voxelClusteringRelativeClusterDistance * leafSize;
-    double squaredClusterDistance = clusterDistance * clusterDistance;
-    halfNeighborhoodSize = static_cast<int>(ceil(clusterDistance / leafSize));
-    for (int x = -halfNeighborhoodSize; x <= halfNeighborhoodSize; x++)
-    {
-        for (int y = -halfNeighborhoodSize; y <= halfNeighborhoodSize; y++)
-        {
-            for (int z = -halfNeighborhoodSize; z <= halfNeighborhoodSize; z++)
-            {
-                // Don't add the centermost voxel (i.e. (0, 0, 0)) to its neighborhood.
-                bool isCentermostVoxel = x == 0 && y == 0 && z == 0;
-
-                double xOffset = x * leafSize;
-                double yOffset = y * leafSize;
-                double zOffset = z * leafSize;
-                double squaredDistanceToCenter = xOffset * xOffset + yOffset * yOffset + zOffset * zOffset;
-                bool satisfiesEuclideanDistance = squaredDistanceToCenter <= squaredClusterDistance;
-                
-                if (satisfiesEuclideanDistance && !isCentermostVoxel)
-                {
-                    voxelClusteringNeighborhood.push_back(octomap::point3d(xOffset, yOffset, zOffset));
-                }
-            }
-        }
-    }
+    // Initialize the array of the neighborhoods to check when filtering voxels and when clustering voxels.
+    octreeFilteringNeighborhood = initializeEuclideanDistanceNeighborhood(octreeFilteringRelativeNeighborDistance);
+    voxelClusteringNeighborhood = initializeEuclideanDistanceNeighborhood(voxelClusteringRelativeClusterDistance);
 
     // Define the colors to use for clustering voxel clusters. I'm just going to assume that there will never be more
     // than 16 dynamic objects visible at once. If there will ever be more clusters than that, the assigned colors will
@@ -133,10 +97,50 @@ SpatialMapper::~SpatialMapper()
     delete staticObjectsOctree;
 }
 
+std::vector<octomap::point3d> SpatialMapper::initializeEuclideanDistanceNeighborhood(double relativeNeighborDistance)
+{
+    std::vector<octomap::point3d> neighborhood;
+
+    double neighborDistance = relativeNeighborDistance * leafSize;
+    double squaredNeighborDistance = neighborDistance * neighborDistance;
+    int halfNeighborhoodSize = static_cast<int>(ceil(relativeNeighborDistance));
+    for (int x = -halfNeighborhoodSize; x <= halfNeighborhoodSize; x++)
+    {
+        for (int y = -halfNeighborhoodSize; y <= halfNeighborhoodSize; y++)
+        {
+            for (int z = -halfNeighborhoodSize; z <= halfNeighborhoodSize; z++)
+            {
+                // Don't add the centermost voxel (i.e. (0, 0, 0)) to its neighborhood.
+                bool isCentermostVoxel = x == 0 && y == 0 && z == 0;
+
+                double xOffset = x * leafSize;
+                double yOffset = y * leafSize;
+                double zOffset = z * leafSize;
+                double squaredDistanceToCenter = xOffset * xOffset + yOffset * yOffset + zOffset * zOffset;
+                bool satisfiesEuclideanDistance = squaredDistanceToCenter <= squaredNeighborDistance;
+
+                if (satisfiesEuclideanDistance && !isCentermostVoxel)
+                {
+                    neighborhood.push_back(octomap::point3d(x * leafSize, y * leafSize, z * leafSize));
+                }
+            }
+        }
+    }
+
+    ROS_INFO("Calculated neighborhood with relative neighbor distance of %f contains %lu voxels.",
+            relativeNeighborDistance, neighborhood.size());
+
+    return neighborhood;
+}
+
 void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
+    ros::WallTime time1 = ros::WallTime::now();
+
     octomap::OcTree* currentFrameOctree = pointCloudFrameToOctree(msg);
     currentFrameOctree->expand();
+
+    ros::WallTime time2 = ros::WallTime::now();
 
     // Filter all free voxels at the edges of the new octree. This will ensure that we don't accidentally mark voxels
     // as free even though they are actually occupied by some object which is ever so slightly outside the sensor's
@@ -158,8 +162,11 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         currentFrameOctree = filteredOctree;
     }
 
+    ros::WallTime time3 = ros::WallTime::now();
+
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
     StaticObjectsOctreeUpdateResult updateResult = updateStaticObjectsOctree(currentFrameOctree);
+    ros::WallTime time4 = ros::WallTime::now();
     octomap::OcTree* dynamicObjectsOctree;
     if (doFloorRemovalInDynamicObjects)
     {
@@ -177,14 +184,20 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         dynamicObjectsOctree = voxelCenterPointsToOctree(updateResult.dynamicVoxelCenterPoints);
     }
 
+    ros::WallTime time5 = ros::WallTime::now();
+
     // Cluster all dynamic voxels.
     dynamicObjectsOctree->expand();
     std::vector<std::vector<octomap::point3d>> dynamicObjectClusters = detectVoxelClusters(dynamicObjectsOctree);
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
 
+    ros::WallTime time6 = ros::WallTime::now();
+
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
     dynamicObjectsOctree->prune();
+
+    ros::WallTime time7 = ros::WallTime::now();
 
     // Publish the results.
     ros::Time time = ros::Time::now();
@@ -193,6 +206,18 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
+
+    ros::WallTime time8 = ros::WallTime::now();
+    ROS_INFO("=======================================================================================================");
+    ROS_INFO("Point cloud -> Octree: %f ms", (time2 - time1).toNSec() * 1e-6);
+    ROS_INFO("Free space filtering: %f ms", (time3 - time2).toNSec() * 1e-6);
+    ROS_INFO("Detection of dynamic voxels: %f ms", (time4 - time3).toNSec() * 1e-6);
+    ROS_INFO("Floor removal & Dynamic octree creation: %f ms", (time5 - time4).toNSec() * 1e-6);
+    ROS_INFO("Clustering of dynamic voxels: %f ms", (time6 - time5).toNSec() * 1e-6);
+    ROS_INFO("Octree pruning: %f ms", (time7 - time6).toNSec() * 1e-6);
+    ROS_INFO("Publishing results: %f ms", (time8 - time7).toNSec() * 1e-6);
+    ROS_INFO("Total elapsed time: %f ms", (time8 - time1).toNSec() * 1e-6);
+    ROS_INFO("=======================================================================================================");
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -216,7 +241,11 @@ octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
     octomap::point3d sensorOrigin
         = octomap::point3d(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
     octomap::OcTree* octree = new octomap::OcTree(leafSize);
-    octree->insertPointCloud(pointcloudOctomap, sensorOrigin, msg->maxReliableDepth);
+    octree->insertPointCloud(pointcloudOctomap, sensorOrigin, msg->maxReliableDepth, octreeInsertionLazyEval, octreeInsertionDiscretize);
+    if (octreeInsertionLazyEval)
+    {
+        octree->updateInnerOccupancy();
+    }
 
     return octree;
 }
@@ -228,24 +257,50 @@ octomap::OcTree* SpatialMapper::filterOctreeFreespace(octomap::OcTree* octreeToF
     // multiple times). However, this method will therefore produce unwanted results when given an octree which is not
     // already expanded.
     
-    octomap::OcTree* filteredOctree = new octomap::OcTree(leafSize);
+    // To begin with, we're storing the occupancy information of all known voxels in a hashmap. While we could always
+    // look that up on the octree whenever we need to access this information, it is actually faster to store the known
+    // occupancy states in a hashmap first and to perform the lookups on the hashmap.
+    std::unordered_map<octomap::point3d, bool> voxels;
     for (auto it = octreeToFilter->begin_leafs(); it != octreeToFilter->end_leafs(); ++it)
     {
-        octomap::point3d coordinates = it.getCoordinate();
+        const octomap::point3d& coordinates = it.getCoordinate();
+        bool occupied = octreeToFilter->isNodeOccupied(*it);
+        voxels[coordinates] = occupied;
+    }
 
-        if (octreeToFilter->isNodeOccupied(*it))
+    // Now we can iterate over all voxels and check their neighboring voxels to find out whether we can keep the voxel
+    // or whether we have to discard it. This is the part where the previously created hashmap will help a lot to speed
+    // things up as we will now perform many lookups on whether there is occupancy information about neighboring voxels.
+    octomap::OcTree* filteredOctree = new octomap::OcTree(leafSize);
+    for (auto it = voxels.begin(); it != voxels.end(); ++it)
+    {
+        const octomap::point3d& coordinates = it->first;
+        const bool occupied = it->second;
+
+        if (occupied)
         {
             // Current voxel is occupied. Add it to the filtered octree without any further checks.
             octomap::OcTreeNode* insertedNode = filteredOctree->updateNode(coordinates, true);
-            insertedNode->setLogOdds(it->getLogOdds());
+            insertedNode->setLogOdds(1.0);
         }
         else
         {
             // Current voxel is free. Check that none of its neighbors is an unknown voxel.
             for (size_t i = 0; i < octreeFilteringNeighborhood.size(); i++)
             {
-                if (octreeToFilter->search(coordinates + octreeFilteringNeighborhood[i]) == NULL)
+                // The conversion from coord to key back to coord is needed to ensure that the calculated voxel center
+                // point is actually in the center of the voxel. Due to floating point imprecisions the calculated
+                // center point may not be exactly in the voxel's center and might need to be ever so slightly adjusted.
+                // If this wasn't done, it may happen that some of the neighbors may not be found during lookup even
+                // though we have some occupancy information about these voxels stored.
+                octomap::point3d neighborCenterPoint = coordinates + octreeFilteringNeighborhood[i];
+                neighborCenterPoint = octreeToFilter->keyToCoord(octreeToFilter->coordToKey(neighborCenterPoint));
+
+                if (voxels.find(neighborCenterPoint) == voxels.end())
                 {
+                    // We have no occupancy information about the neighboring voxel. The current voxel might have been
+                    // falsely classified as being free, so we don't add it to the filtered octree.
+
                     // I know, I know, goto is considered bad. However, we need to continue with the next iteration of
                     // the outer loop (i.e. the one iterating over all leaves of the octree) and according to
                     // https://stackoverflow.com/a/41179682 using a goto statement seems to be the easiest solution in
@@ -255,7 +310,7 @@ octomap::OcTree* SpatialMapper::filterOctreeFreespace(octomap::OcTree* octreeToF
             }
 
             // Current voxel is free and does not neighbor any unknown voxel. We can add it to the filtered octree.
-            filteredOctree->updateNode(coordinates, false)->setLogOdds(it->getLogOdds());
+            filteredOctree->updateNode(coordinates, false)->setLogOdds(-1.0);
         }
 
         // Label for jumping to the next loop iteration (or for leaving the loop if we're in the last iteration). As
