@@ -12,7 +12,7 @@ int main(int argc, char **argv)
     ros::Subscriber shortThrowDirectionsSubscriber = n.subscribe(SHORT_THROW_PIXEL_DIRECTIONS_TOPIC, 10, shortThrowPixelDirectionsCallback);
     ros::Subscriber longThrowDirectionsSubscriber = n.subscribe(LONG_THROW_PIXEL_DIRECTIONS_TOPIC, 10, longThrowPixelDirectionsCallback);
 
-    depthDataReceiver = new DepthDataReceiver(n);
+    depthDataReceiver = initializeDepthDataReceiver(n);
 
     // Perform the update loop using a multi threaded spinner with an amount of threads equal to the core count of the CPU.
     ros::MultiThreadedSpinner spinner(0);

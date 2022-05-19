@@ -1,4 +1,7 @@
+#pragma once
+
 #include "DepthDataReceiver.h"
+#include "MainInitDepthDataReceiver.h"
 #include "Topics.h"
 
 #include <pcl_conversions/pcl_conversions.h>
