@@ -80,7 +80,7 @@ struct PossibleDynamicVoxelInfo {
     }
 };
 
-struct StaticObjectsOctreeUpdateResult
+struct VoxelClassificationResult
 {
     // The center points of all occupied voxels (in the octomap of the new sensor data frame) which were classified as
     // static voxels.
@@ -108,6 +108,16 @@ public:
     // Callbacks for handling the incoming point cloud frames.
     void handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
+    // Setter for the switch whether the spatial map should be updated on arrival of a new point cloud frame. When set
+    // to false, the global spatial map of static objects will no longer be updated (until set to true again) and only
+    // dynamic objects will be detected. This also means that when voxels for which no occupancy data is stored in the
+    // global spatial map are observed, they will all be detected as dynamic objects (even though they might correspond
+    // to static objects).
+    void setUpdateSpatialMap(bool _updateSpatialMap);
+
+    // Removes all voxels from the global spatial map.
+    void clearSpatialMap();
+
 private:
     // Initializes a voxel neighborhood based on the euclidean distance to the centermost voxel.
     std::vector<octomap::point3d> initializeEuclideanDistanceNeighborhood(double relativeNeighborDistance);
@@ -126,7 +136,8 @@ private:
 
     // Updates the octree containing the global spatial map based on the information contained in the given octree (must
     // be expanded) with information obtained in the current frame.
-    StaticObjectsOctreeUpdateResult updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree);
+    VoxelClassificationResult classifyVoxelsWithSpatialMapUpdate(octomap::OcTree* currentFrameOctree);
+    VoxelClassificationResult classifyVoxelsWithoutSpatialMapUpdate(octomap::OcTree* currentFrameOctree);
 
     // Updates the floor height according to the given center points of occupied voxels. The floor is assumed to be at
     // the height of the lowest voxels ever observed.
@@ -177,7 +188,7 @@ private:
     int numFreeObservationsBeforeVoxelRemoval;
     int numFramesBeforePossibleDynamicVoxelRemoval;
 
-    // Hyper parameters for floor removal in voxels of dynamic objects.
+    // Switches and hyper parameters for floor removal in voxels of dynamic objects.
     bool doFloorRemovalInDynamicObjects;
     int floorRemovalMinFloorVoxels;
     int floorRemovalRelativeNoiseHeight;
@@ -190,6 +201,7 @@ private:
 
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
+    bool updateSpatialMap = true;
 
     // A mutex used for mutual exclusion when accessing the global spatial map.
     boost::mutex spatialMapMutex;

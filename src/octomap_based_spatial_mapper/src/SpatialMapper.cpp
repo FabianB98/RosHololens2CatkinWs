@@ -135,16 +135,19 @@ std::vector<octomap::point3d> SpatialMapper::initializeEuclideanDistanceNeighbor
 
 void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    ros::WallTime time1 = ros::WallTime::now();
-
     octomap::OcTree* currentFrameOctree = pointCloudFrameToOctree(msg);
     currentFrameOctree->expand();
 
-    ros::WallTime time2 = ros::WallTime::now();
+    // As this ROS node uses multiple threads to process received messages, updateSpatialMap might be changed at any
+    // point in time. In order to ensure that this won't cause any unintended side effects when it is changed while
+    // any thread is inside this function, we'll create a local copy of the current state of updateSpatialMap to ensure
+    // that the current execution consistently does or doesn't update the spatial map (instead of changing behavior at
+    // some point in time during processing of this frame).
+    bool updateSpatialMapThisFrame = updateSpatialMap;
 
     // Filter all free voxels at the edges of the new octree. This will ensure that we don't accidentally mark voxels
     // as free even though they are actually occupied by some object which is ever so slightly outside the sensor's
-    // viewing frustum or sensing range. While such objects usually shouldn't be a problem in almost all cases, there is
+    // view frustum or sensing range. While such objects usually shouldn't be a problem in almost all cases, there is
     // an edge case when looking at large flat objects (such as walls or the floor) at shallow angles.
     // For these edge cases, the conversion of the point cloud to an octree can cause a free voxel to be inserted in a
     // location which would be an occupied voxel if the sensor's field of view was ever so slightly larger. This is due
@@ -153,7 +156,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     // caused by the sensor's finite viewing angle, there is no evidence for these voxels to be classified as occupied,
     // so they will be wrongly classified as free.
     // As the HoloLens's depth sensor has no 360° field of view, filtering the octree is therefore highly recommended.
-    if (doOctreeFreespaceFiltering)
+    if (doOctreeFreespaceFiltering && updateSpatialMapThisFrame)
     {
         octomap::OcTree* filteredOctree = filterOctreeFreespace(currentFrameOctree);
         filteredOctree->expand();
@@ -162,42 +165,39 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         currentFrameOctree = filteredOctree;
     }
 
-    ros::WallTime time3 = ros::WallTime::now();
-
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
-    StaticObjectsOctreeUpdateResult updateResult = updateStaticObjectsOctree(currentFrameOctree);
-    ros::WallTime time4 = ros::WallTime::now();
+    VoxelClassificationResult classificiationResult = updateSpatialMapThisFrame 
+            ? classifyVoxelsWithSpatialMapUpdate(currentFrameOctree)
+            : classifyVoxelsWithoutSpatialMapUpdate(currentFrameOctree);
     octomap::OcTree* dynamicObjectsOctree;
     if (doFloorRemovalInDynamicObjects)
     {
         // Potential floor voxels should be removed. Update the floor height and remove all dynamic voxels which might
         // be part of the floor or some noise above the floor.
-        updateFloorHeight(updateResult.staticVoxelCenterPoints);
-        updateFloorHeight(updateResult.dynamicVoxelCenterPoints);
+        if (updateSpatialMapThisFrame)
+        {
+            updateFloorHeight(classificiationResult.staticVoxelCenterPoints);
+            updateFloorHeight(classificiationResult.dynamicVoxelCenterPoints);
+        }
 
-        dynamicObjectsOctree = voxelCenterPointsToOctree(removeFloorVoxels(updateResult.dynamicVoxelCenterPoints));
+        std::vector<octomap::point3d> dynamicVoxels = removeFloorVoxels(classificiationResult.dynamicVoxelCenterPoints);
+        dynamicObjectsOctree = voxelCenterPointsToOctree(dynamicVoxels);
     }
     else
     {
         // Potential floor voxels should not be removed. The octree containing all dynamic voxels can directly be
         // created from the dynamic voxel center points without any additional removal of certain voxels.
-        dynamicObjectsOctree = voxelCenterPointsToOctree(updateResult.dynamicVoxelCenterPoints);
+        dynamicObjectsOctree = voxelCenterPointsToOctree(classificiationResult.dynamicVoxelCenterPoints);
     }
-
-    ros::WallTime time5 = ros::WallTime::now();
 
     // Cluster all dynamic voxels.
     dynamicObjectsOctree->expand();
     std::vector<std::vector<octomap::point3d>> dynamicObjectClusters = detectVoxelClusters(dynamicObjectsOctree);
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
 
-    ros::WallTime time6 = ros::WallTime::now();
-
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
     dynamicObjectsOctree->prune();
-
-    ros::WallTime time7 = ros::WallTime::now();
 
     // Publish the results.
     ros::Time time = ros::Time::now();
@@ -206,18 +206,6 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
-
-    ros::WallTime time8 = ros::WallTime::now();
-    ROS_INFO("=======================================================================================================");
-    ROS_INFO("Point cloud -> Octree: %f ms", (time2 - time1).toNSec() * 1e-6);
-    ROS_INFO("Free space filtering: %f ms", (time3 - time2).toNSec() * 1e-6);
-    ROS_INFO("Detection of dynamic voxels: %f ms", (time4 - time3).toNSec() * 1e-6);
-    ROS_INFO("Floor removal & Dynamic octree creation: %f ms", (time5 - time4).toNSec() * 1e-6);
-    ROS_INFO("Clustering of dynamic voxels: %f ms", (time6 - time5).toNSec() * 1e-6);
-    ROS_INFO("Octree pruning: %f ms", (time7 - time6).toNSec() * 1e-6);
-    ROS_INFO("Publishing results: %f ms", (time8 - time7).toNSec() * 1e-6);
-    ROS_INFO("Total elapsed time: %f ms", (time8 - time1).toNSec() * 1e-6);
-    ROS_INFO("=======================================================================================================");
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -399,9 +387,9 @@ std::vector<VoxelDiffInfo> SpatialMapper::calculateOctreeVoxelDiff(
     return result;
 }
 
-StaticObjectsOctreeUpdateResult SpatialMapper::updateStaticObjectsOctree(octomap::OcTree* currentFrameOctree)
+VoxelClassificationResult SpatialMapper::classifyVoxelsWithSpatialMapUpdate(octomap::OcTree* currentFrameOctree)
 {
-    StaticObjectsOctreeUpdateResult result;
+    VoxelClassificationResult result;
 
     spatialMapMutex.lock();
 
@@ -502,6 +490,46 @@ StaticObjectsOctreeUpdateResult SpatialMapper::updateStaticObjectsOctree(octomap
     dynamicVoxelsUpdateSequenceNumber++;
 
     spatialMapMutex.unlock();
+
+    return result;
+}
+
+VoxelClassificationResult SpatialMapper::classifyVoxelsWithoutSpatialMapUpdate(octomap::OcTree* currentFrameOctree)
+{
+    VoxelClassificationResult result;
+
+    spatialMapMutex.lock();
+    std::vector<VoxelDiffInfo> diff = calculateOctreeVoxelDiff(staticObjectsOctree, currentFrameOctree);
+    spatialMapMutex.unlock();
+
+    for (auto it = diff.begin(); it != diff.end(); it++)
+    {
+        if (it->type == VoxelDiffType::FREE_OCCUPIED || it->type == VoxelDiffType::UNKNOWN_OCCUPIED)
+        {
+            // Azim 2012 paper states: "If the transition between these two states for a specific voxel of the grid is
+            // such that S_{t-1} = free and S_t = occupied then this is the case when an object is detected on a
+            // location previously seen as free space and it is possibly a moving object. We add it to the list of
+            // possible dynamic voxels.
+            
+            // Azim 2012 paper states: "If an object appears at a location which was previously unobserved, then we can
+            // say nothing about that object. For such measurements, a priori we will suppose that they are static until
+            // later evidences come."
+            // As this function doesn't update the global spatial map, we can't add the voxel to the spatial map
+            // (indicating that we assumed it being static), so I'll deviate here a bit from the paper by assuming that
+            // voxels with no previous occupancy information are dynamic. However, considering that this function should
+            // only be used after the spatial map of the environment was already built, it is also safe to say that we
+            // will ever receive information about voxels for which we already have previous information so this case
+            // should actually (almost) never occur.
+
+            result.dynamicVoxelCenterPoints.push_back(it->coordinates);
+        }
+        else if (it->type == VoxelDiffType::OCCUPIED_OCCUPIED)
+        {
+            // Azim 2012 paper states: "If S_{t-1} = occupied and S_t = occupied, it means that an object is observed on
+            // a location previously occupied then it probably is static."
+            result.staticVoxelCenterPoints.push_back(it->coordinates);
+        }
+    }
 
     return result;
 }
@@ -696,4 +724,22 @@ octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(std::vector<std::v
     }
 
     return colorizedClusterOctree;
+}
+
+void SpatialMapper::setUpdateSpatialMap(bool _updateSpatialMap)
+{
+    updateSpatialMap = _updateSpatialMap;
+    ROS_INFO("Set updateSpatialMap to %s.", updateSpatialMap ? "true" : "false");
+}
+
+void SpatialMapper::clearSpatialMap()
+{
+    ROS_INFO("Clearing spatial map...");
+
+    spatialMapMutex.lock();
+    delete staticObjectsOctree;
+    staticObjectsOctree = new octomap::OcTree(leafSize);
+    spatialMapMutex.unlock();
+
+    publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, ros::Time::now());
 }
