@@ -689,7 +689,7 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
                     // in the voxelsToCheck set during lookup even though they are in that set.
                     octomap::point3d neighbor = voxelCenterPoint + voxelClusteringNeighborhood[i];
                     neighbor = octreeToCluster->keyToCoord(octreeToCluster->coordToKey(neighbor));
-                    clusterCandidateVoxels.push_back(voxelCenterPoint + voxelClusteringNeighborhood[i]);
+                    clusterCandidateVoxels.push_back(neighbor);
                 }
             }
         }

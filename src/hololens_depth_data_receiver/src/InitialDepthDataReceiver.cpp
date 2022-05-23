@@ -300,15 +300,15 @@ void InitialDepthDataReceiver::handlePixelDirections(
 
     for (uint32_t i = 0; i < pixelDirectionsMsg->pixelDirections.size(); ++i)
     {
-        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections.at(i);
+        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections[i];
         if (dir.u < min_u) min_u = dir.u;
         if (dir.u > max_u) max_u = dir.u;
         if (dir.v < min_v) min_v = dir.v;
         if (dir.v > max_v) max_v = dir.v;
     }
 
-    float width = static_cast<float>(max_u - min_u);
-    float height = static_cast<float>(max_v - min_v);
+    float width = static_cast<float>(max_u - min_u + 1.0);
+    float height = static_cast<float>(max_v - min_v + 1.0);
 
     // Calculate the coordinates of the rectangle's edges.
     float rectUMinRelative = noisyPixelRemovalRectCenterX - 0.5f * noisyPixelRemovalRectWidth;
@@ -331,7 +331,7 @@ void InitialDepthDataReceiver::handlePixelDirections(
     hololens_msgs::PixelDirections::Ptr filteredPixelDirections = hololens_msgs::PixelDirections::Ptr(new hololens_msgs::PixelDirections());
     for (uint32_t i = 0; i < pixelDirectionsMsg->pixelDirections.size(); ++i)
     {
-        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections.at(i);
+        hololens_msgs::PixelDirection dir = pixelDirectionsMsg->pixelDirections[i];
 
         bool insideRect = !discardNoisyPixelsRect 
             || (rectUMin <= dir.u && dir.u <= rectUMax && rectVMin <= dir.v && dir.v <= rectVMax);
@@ -545,4 +545,99 @@ std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, pcl::PointCloud<pcl::PointXYZ>::P
 
     // Return the calculated point cloud.
     return std::make_pair(pointCloudCamSpace, artificialEndpoints);
+}
+
+void InitialDepthDataReceiver::publishDepthImage(
+    const DepthMap depthMap,
+    const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
+    const ros::Publisher& publisher, 
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const float minDepth,
+    const float minReliableDepth,
+    const float maxReliableDepth,
+    const float maxDepth)
+{
+    // Create the ROS message for the image.
+    sensor_msgs::Image image;
+
+    // Set the header of the image.
+    image.header.seq = sequenceNumber;
+    image.header.stamp = timestamp;
+    image.header.frame_id = "hololens_cam";
+
+    // Set the meta data (width, height, encoding, ...) of the image.
+    image.height = depthMap.height;
+    image.width = depthMap.width;
+    image.encoding = sensor_msgs::image_encodings::RGB8;
+    image.is_bigendian = 0;
+    image.step = depthMap.width * 3;
+
+    // Initialize the image to be completely black.
+    image.data.resize(image.height * image.width * 3, 0);
+
+    // Mark all pixels which have a corresponding pixel direction as red.
+    for (uint32_t i = 0; i < pixelDirections->pixelDirections.size(); ++i)
+    {
+        hololens_msgs::PixelDirection dir = pixelDirections->pixelDirections[i];
+        uint32_t index = (dir.v * image.width + dir.u) * 3;
+        image.data[index] = 255;
+    }
+
+    // Brighten the image and color all unreliable pixels.
+    for (uint32_t v = 0; v < image.height; ++v)
+    {
+        for (uint32_t u = 0; u < image.width; ++u)
+        {
+            uint32_t index = (v * image.width + u) * 3;
+            bool hasNoPixelDirection = image.data[index] == 0;
+
+            // Get the depth of the current pixel.
+            uint32_t pixelValue = depthMap.valueAt(u, v);
+            float depth = static_cast<float>(pixelValue) / 1000.0f;
+
+            // Calculate the greyscale value which will be used for the pixel.
+            uint8_t greyscaleValue = static_cast<uint8_t>(255.0f * depth / maxDepth);
+
+            // Check if the depth is within a the (reliable) depth range.
+            if (depth < minDepth || depth > maxDepth)
+            {
+                // Depth is outside the depth range. Color the current pixel black.
+                image.data[index] = 0;
+                image.data[index + 1] = 0;
+                image.data[index + 2] = 0;
+            }
+            else if (hasNoPixelDirection)
+            {
+                // Pixel doesn't have any pixel direction associated with it. Color it blue.
+                image.data[index] = 0;
+                image.data[index + 1] = 0;
+                image.data[index + 2] = greyscaleValue;
+            }
+            else if (depth < minReliableDepth)
+            {
+                // Depth too small to be considered as reliable. Color the current pixel purple.
+                image.data[index] = greyscaleValue * 3;
+                image.data[index + 1] = 0;
+                image.data[index + 2] = greyscaleValue * 3;
+            }
+            else if (depth > maxReliableDepth)
+            {
+                // Depth is too high to be considered as reliable. Color the current pixel red.
+                image.data[index] = greyscaleValue;
+                image.data[index + 1] = 0;
+                image.data[index + 2] = 0;
+            }
+            else
+            {
+                // Depth is inside the reliable depth range. Color the current pixel grey.
+                image.data[index] = greyscaleValue;
+                image.data[index + 1] = greyscaleValue;
+                image.data[index + 2] = greyscaleValue;
+            }
+        }
+    }
+    
+    // Publish the message.
+    publisher.publish(image);
 }

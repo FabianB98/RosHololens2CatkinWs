@@ -3,11 +3,13 @@
 #include <cmath>
 #include <stdlib.h>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
 #include "Base64.h"
 #include "DepthMap.h"
+#include "Pixel.h"
 #include "Topics.h"
 
 #include <boost/filesystem.hpp>
@@ -103,14 +105,4 @@ protected:
         const hololens_msgs::DepthFrame::ConstPtr& depthFrame,
         tf::TransformBroadcaster& publisher,
         const ros::Time& timestamp);
-    void publishDepthImage(
-        const DepthMap depthMap,
-        const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
-        const ros::Publisher& publisher, 
-        uint32_t sequenceNumber,
-        const ros::Time& timestamp,
-        const float minDepth,
-        const float minReliableDepth,
-        const float maxReliableDepth,
-        const float maxDepth);
 };

@@ -10,7 +10,7 @@
 useShortThrow: false
 useLongThrow: true
 
-# Hyper parameters used for median filtering.
+# Hyper parameters used for median filtering. Only affects the InitialDepthDataReceiver.
 doMedianFiltering: true
 medianFilterWindowSize: 3
 
@@ -18,20 +18,25 @@ medianFilterWindowSize: 3
 doDownsampling: true
 downsamplingLeafSize: 0.025
 
-# Hyper parameters used for outlier removal with a radius outlier removal filer.
+# Hyper parameters used for outlier removal with a radius outlier removal filer. Only affects the InitialDepthDataReceiver.
 doOutlierRemovalRadius: false
 outlierRemovalRadiusSearch: 0.05
 outlierRemovalMinNeighborsInRadius: 15
 
-# Hyper parameters used for outlier removal with a statistical outlier removal filter.
+# Hyper parameters used for outlier removal with a statistical outlier removal filter. Only affects the InitialDepthDataReceiver.
 doOutlierRemovalStatistical: false
 outlierRemovalNeighborsToCheck: 10
 outlierRemovalStdDeviationMultiplier: 0.5
 
-# Hyper parameters uesd for outlier removal by clustering and discarding too small clusters.
+# Hyper parameters uesd for outlier removal by clustering and discarding too small clusters. Only affects the InitialDepthDataReceiver.
 doOutlierRemovalClustering: true
 outlierRemovalClusterTolerance: 0.08
 outlierRemovalMinClusterSize: 500
+
+# Hyper parameters for clustering of similar pixels in received depth maps. Only affects the FasterDepthDataReceiver.
+pixelClusteringNeighboringPixelDistance: 1.5
+pixelClusteringAbsoluteDepthValueSimilarity: 50 # A value of 50 indicates that neighboring pixels must have a depth value within a range of +/- 5 centimeters of the current pixel's depth value in order for them to be considered in the same cluster. 
+pixelClusteringMinClusterSize: 250
 
 # Sensor intrinsics of the short throw depth sensor.
 shortThrowMinDepth: 0.1
@@ -47,7 +52,7 @@ longThrowMaxDepth: 16.0
 
 # Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region of
 # interst. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame. Positions and
-# sizes are relative positions and sizes in the depth sensor's image space.
+# sizes are relative positions and sizes in the depth sensor's image space. Only affects the InitialDepthDataReceiver.
 discardNoisyPixelsRect: true
 noisyPixelRemovalRectCenterX: 0.5
 noisyPixelRemovalRectCenterY: 0.5
@@ -56,7 +61,7 @@ noisyPixelRemovalRectHeight: 0.8
 
 # Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
 # interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame. Positions and
-# sizes are relative positions and sizes in the depth sensor's image space.
+# sizes are relative positions and sizes in the depth sensor's image space. Only affects the InitialDepthDataReceiver.
 discardNoisyPixelsCircle: true
 noisyPixelRemovalCircleCenterX: 0.5
 noisyPixelRemovalCircleCenterY: 0.5

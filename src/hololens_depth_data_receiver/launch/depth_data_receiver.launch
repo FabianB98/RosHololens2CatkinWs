@@ -1,4 +1,4 @@
 <launch>
-    <!-- Only including a single launch file might seem weird, but there are other launch files including this launch file, so I'm just forwarding them to the renamed version of the initial launch file. -->
-    <include file="$(find hololens_depth_data_receiver)/launch/initial_depth_data_receiver.launch"/>
+    <!-- Only including a single launch file might seem weird, but there are other launch files including this launch file, so I'm just forwarding them to the launch file for the faster depth data receiver. -->
+    <include file="$(find hololens_depth_data_receiver)/launch/faster_depth_data_receiver.launch"/>
 </launch>

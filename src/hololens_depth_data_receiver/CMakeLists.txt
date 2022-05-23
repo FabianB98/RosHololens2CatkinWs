@@ -160,10 +160,10 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
-add_executable(initial_depth_data_receiver src/Main.cpp src/MainInitial.cpp src/InitialDepthDataReceiver.cpp src/DepthDataReceiver.cpp src/DepthMap.cpp src/Base64.cpp)
+add_executable(initial_depth_data_receiver src/Main.cpp src/MainInitial.cpp src/InitialDepthDataReceiver.cpp src/DepthDataReceiver.cpp src/DepthMap.cpp src/Pixel.cpp src/Base64.cpp)
 target_link_libraries(initial_depth_data_receiver ${catkin_LIBRARIES})
 
-add_executable(faster_depth_data_receiver src/Main.cpp src/MainFaster.cpp src/FasterDepthDataReceiver.cpp src/DepthDataReceiver.cpp src/DepthMap.cpp src/Base64.cpp)
+add_executable(faster_depth_data_receiver src/Main.cpp src/MainFaster.cpp src/FasterDepthDataReceiver.cpp src/DepthDataReceiver.cpp src/DepthMap.cpp src/Pixel.cpp src/Base64.cpp)
 target_link_libraries(faster_depth_data_receiver ${catkin_LIBRARIES})
 #############
 ## Install ##

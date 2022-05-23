@@ -65,6 +65,19 @@ private:
         const float maxReliableDepth,
         const float maxDepth);
 
+    // Publishes a colored image displaying information about which pixels of the depth map were used to reconstruct the
+    // observed environment.
+    void publishDepthImage(
+        const DepthMap depthMap,
+        const hololens_msgs::PixelDirections::ConstPtr& pixelDirections,
+        const ros::Publisher& publisher, 
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const float minDepth,
+        const float minReliableDepth,
+        const float maxReliableDepth,
+        const float maxDepth);
+
     // Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
     bool useShortThrow;
     bool useLongThrow;

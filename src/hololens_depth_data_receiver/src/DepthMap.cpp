@@ -40,6 +40,10 @@ uint32_t DepthMap::valueAt(uint32_t u, uint32_t v) const
     }
 }
 
+uint32_t DepthMap::valueAt(const Pixel& p) const
+{
+    return valueAt(p.u, p.v);
+}
 
 void DepthMap::setValueAt(uint32_t u, uint32_t v, uint32_t value)
 {
@@ -100,4 +104,19 @@ void DepthMap::setValueAt(uint32_t u, uint32_t v, uint32_t value)
             data[index + 3] = static_cast<uint8_t>(value >> 24);
         }
     }
+}
+
+void DepthMap::setValueAt(const Pixel& p, uint32_t value)
+{
+    setValueAt(p.u, p.v, value);
+}
+
+bool DepthMap::hasValueForPixel(uint32_t u, uint32_t v) const
+{
+    return u < width && v < height;
+}
+
+bool DepthMap::hasValueForPixel(const Pixel& p) const
+{
+    return hasValueForPixel(p.u, p.v);
 }

@@ -2,20 +2,6 @@
 
 #include "DepthDataReceiver.h"
 
-namespace std {
-    template <>
-    struct hash<std::pair<uint32_t, uint32_t>>
-    {
-        std::size_t operator()(const std::pair<uint32_t, uint32_t>& pair) const
-        {
-            std::size_t res = 17;
-            res = res * 31 + hash<float>()(pair.first);
-            res = res * 31 + hash<float>()(pair.second);
-            return res;
-        }
-    };
-}
-
 class FasterDepthDataReceiver : public DepthDataReceiver
 {
 public:
@@ -29,15 +15,18 @@ public:
     void handleLongThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg);
 
 private:
+    // Initializes a pixel neighborhood based on the euclidean distance to the centermost pixel.
+    std::vector<Pixel> initializeEuclideanDistanceNeighborhood(double neighborDistance);
+
     // Handles the arrival of a new pixel directions message.
     void handlePixelDirections(
         const hololens_msgs::PixelDirections::ConstPtr& pixelDirectionsMsg,
-        std::unordered_map<std::pair<uint32_t, uint32_t>, hololens_msgs::PixelDirection>& pixelDirectionsTarget);
+        std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>* pixelDirectionsLookupTableTarget);
 
     // Handles the arrival of a new depth frame.
     void handleDepthFrame(
         const hololens_msgs::DepthFrame::ConstPtr& depthFrame,
-        const std::unordered_map<std::pair<uint32_t, uint32_t>, hololens_msgs::PixelDirection>& pixelDirections,
+        const std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>& pixelDirectionsLookupTable,
         const float minDepth,
         const float minReliableDepth,
         const float maxReliableDepth,
@@ -46,6 +35,34 @@ private:
         const ros::Publisher& pointCloudWorldSpacePublisher,
         const ros::Publisher& pointCloudFramePublisher,
         uint32_t* sequenceNumber);
+
+    // Detects clusters (in image space) in the given depth map.
+    std::vector<std::vector<Pixel>> detectDepthClusters(DepthMap& depthMap);
+
+    // Reconstructs a point cloud from the data stored in the given depth map for all pixels which are part of any of
+    // the given clusters.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr createPointCloudFromClusters(
+        const std::vector<std::vector<Pixel>>& depthClusters,
+        DepthMap& depthMap,
+        const std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>& pixelDirectionsLookupTable,
+        const float minDepth,
+        const float minReliableDepth,
+        const float maxReliableDepth,
+        const float maxDepth);
+
+    // Publishes a colored image displaying information about which pixels of the depth map were used to reconstruct the
+    // observed environment and to which cluster they were assigned to.
+    void publishDepthImage(
+        const DepthMap depthMap,
+        const std::vector<std::vector<Pixel>>& depthClusters,
+        const std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>& pixelDirectionsLookupTable,
+        const ros::Publisher& publisher, 
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const float minDepth,
+        const float minReliableDepth,
+        const float maxReliableDepth,
+        const float maxDepth);
 
     // Switches for whether short throw and/or long throw depth frames should be used for calculating the point cloud.
     bool useShortThrow;
@@ -63,24 +80,20 @@ private:
     float longThrowMaxReliableDepth;
     float longThrowMaxDepth;
 
-    // Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a rectangular region
-    // of interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
-    bool discardNoisyPixelsRect;
-    float noisyPixelRemovalRectCenterX;
-    float noisyPixelRemovalRectCenterY;
-    float noisyPixelRemovalRectWidth;
-    float noisyPixelRemovalRectHeight;
+    // Hyper parameters for clustering of similar pixels in received depth maps.
+    double pixelClusteringNeighboringPixelDistance;
+    int pixelClusteringAbsoluteDepthValueSimilarity;
+    uint32_t pixelClusteringSquaredDepthValueSimilarity;
+    int pixelClusteringMinClusterSize;
+    std::vector<Pixel> pixelClusteringNeighborhood;
+    std::vector<std::vector<float>> pixelClusterColors;
 
-    // Switches and sensor intrinsics related to discarding noisy pixels of the depth sensors with a circular region of
-    // interest. Pixels outside that region won't be used in the creation of a point cloud from a sensor frame.
-    bool discardNoisyPixelsCircle;
-    float noisyPixelRemovalCircleCenterX;
-    float noisyPixelRemovalCircleCenterY;
-    float noisyPixelRemovalCircleRadius;
+    // Hyper parameters used for downsampling.
+    float downsamplingLeafSize;
 
     // The directions (in camera space) in which each pixel of the depth frames points at.
-    std::unordered_map<std::pair<uint32_t, uint32_t>, hololens_msgs::PixelDirection> shortThrowDirections;
-    std::unordered_map<std::pair<uint32_t, uint32_t>, hololens_msgs::PixelDirection> longThrowDirections;
+    std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>> shortThrowDirectionLookupTable;
+    std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>> longThrowDirectionLookupTable;
 
     // ROS publishers.
     ros::Publisher shortThrowImagePublisher;
