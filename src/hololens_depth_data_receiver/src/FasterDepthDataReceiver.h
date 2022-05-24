@@ -37,7 +37,8 @@ private:
         uint32_t* sequenceNumber);
 
     // Detects clusters (in image space) in the given depth map.
-    std::vector<std::vector<Pixel>> detectDepthClusters(DepthMap& depthMap);
+    std::vector<std::vector<Pixel>> detectDepthClustersWithRegionGrowing(DepthMap& depthMap);
+    std::vector<std::vector<Pixel>> detectDepthClustersWithPclClustering(DepthMap& depthMap);
 
     // Reconstructs a point cloud from the data stored in the given depth map for all pixels which are part of any of
     // the given clusters.
@@ -81,6 +82,7 @@ private:
     float longThrowMaxDepth;
 
     // Hyper parameters for clustering of similar pixels in received depth maps.
+    bool pixelClusteringUsePcl;
     double pixelClusteringNeighboringPixelDistance;
     int pixelClusteringAbsoluteDepthValueSimilarity;
     uint32_t pixelClusteringSquaredDepthValueSimilarity;

@@ -17,6 +17,7 @@
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/ransac.h>
+#include <pcl/segmentation/conditional_euclidean_clustering.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/surface/mls.h>
@@ -59,10 +60,11 @@
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
-// Hyper parameters for clustering of similar pixels in received depth maps.
-#define PIXEL_CLUSTERING_NEIGHBORING_PIXEL_DISTANCE 1.5     // The euclidean distance between "neighboring" pixels.
+// Switches and hyper parameters for clustering of similar pixels in received depth maps.
+#define PIXEL_CLUSTERING_USE_PCL true                       // Whether PCL clustering or the custom region growing should be used.
+#define PIXEL_CLUSTERING_NEIGHBORING_PIXEL_DISTANCE 2.5     // The euclidean distance between "neighboring" pixels.
 #define PIXEL_CLUSTERING_ABSOLUTE_DEPTH_VALUE_SIMILARITY 50 // The maximum depth difference for pixels to be in the same cluster.
-#define PIXEL_CLUSTERING_MIN_CLUSTER_SIZE 250               // Clusters with less pixels than this value will be discarded.
+#define PIXEL_CLUSTERING_MIN_CLUSTER_SIZE 400               // Clusters with less pixels than this value will be discarded.
 
 // Parameters for the voxel grid filter used for downsampling.
 #define DOWNSAMPLING_LEAF_SIZE 0.01f    // At most one point allowed in a voxel within this edge length.
@@ -72,6 +74,20 @@
 //                                              ACTUAL CODE STARTS HERE                                               //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Well, this is kind of a horrible solution to an issue I don't know how to solve otherwise...
+// For reference why this variable is declared as a static variable instead of a member variable: PCL's conditional
+// euclidean clustering takes a static callback for deciding whether two points meet the clustering condition. However,
+// in this callback we have to compare the depth values of the two points to check whether they are close enough to each
+// other, which in term requires access to the threshold stored as a member variable in the FasterDepthDataReceiver.
+// As the callback has to be a static callback (i.e. it can't be a function inside FasterDepthDataReceiver), it also
+// can't access the required threshold value... As workaround to this issue I've decided to store a global copy of the
+// required threshold value here in this global variable. However, it has to be kept in mind that this comes with the
+// drawback that all instances of FasterDepthDataReceivers will share the same clustering threshold if there are ever
+// multiple FasterDepthDataReceivers active in the same ROS node. Fortunately, this drawback should never be of any
+// concern as I can't think of any situation in which one could ever want to have more than one DepthDataReceiver at
+// the same time.
+float pixelClusteringDepthValueSimilarity;
 
 FasterDepthDataReceiver::FasterDepthDataReceiver(ros::NodeHandle n)
 {
@@ -93,9 +109,11 @@ FasterDepthDataReceiver::FasterDepthDataReceiver(ros::NodeHandle n)
 
     // Initialize all hyper parameters for clustering of similar pixels in received depth maps as specified by
     // parameters (or their default value).
+    n.param("pixelClusteringUsePcl", pixelClusteringUsePcl, PIXEL_CLUSTERING_USE_PCL);
     n.param("pixelClusteringNeighboringPixelDistance", pixelClusteringNeighboringPixelDistance, PIXEL_CLUSTERING_NEIGHBORING_PIXEL_DISTANCE);
     n.param("pixelClusteringAbsoluteDepthValueSimilarity", pixelClusteringAbsoluteDepthValueSimilarity, PIXEL_CLUSTERING_ABSOLUTE_DEPTH_VALUE_SIMILARITY);
     n.param("pixelClusteringMinClusterSize", pixelClusteringMinClusterSize, PIXEL_CLUSTERING_MIN_CLUSTER_SIZE);
+    pixelClusteringDepthValueSimilarity = static_cast<float>(pixelClusteringAbsoluteDepthValueSimilarity);
     pixelClusteringSquaredDepthValueSimilarity = pixelClusteringAbsoluteDepthValueSimilarity * pixelClusteringAbsoluteDepthValueSimilarity;
     pixelClusteringNeighborhood = initializeEuclideanDistanceNeighborhood(pixelClusteringNeighboringPixelDistance);
 
@@ -247,17 +265,11 @@ void FasterDepthDataReceiver::handleDepthFrame(
             depthFrame->depthMapPixelStride, false);
 
     // Detect clusters of pixels with similar depth values in the depth map.
-    std::vector<std::vector<Pixel>> depthClusters = detectDepthClusters(depthMap);
+    std::vector<std::vector<Pixel>> depthClusters = pixelClusteringUsePcl
+            ? detectDepthClustersWithPclClustering(depthMap)
+            : detectDepthClustersWithRegionGrowing(depthMap);
 
     // Reconstruct a point cloud from all pixels which were assigned to a cluster.
-    // Please note that this depth data receiver does NOT compute any artificial endpoints (contrary to the initial
-    // depth data receiver) as tests made using the initial depth data receiver have shown that generating artificial
-    // endpoints is in fact not helpful at all (at least when using the depth sensor of the HoloLens 2). As the depth
-    // sensor employed by the HoloLens 2 can't differentiate between points too far away from the sensor and points too
-    // close in front in front of the sensor, the generated artificial endpoints would therefore sometimes falsely
-    // indicate that there is more free space than there is in reality (which caused for voxels to be falsely removed
-    // from the spatial map in the octomap based spatial mapper). It was therefore chosen to leave the calculation of
-    // artificial endpoints out in this depth data receiver which in term also saves some time.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = createPointCloudFromClusters(depthClusters, depthMap,
             pixelDirectionsLookupTable, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
 
@@ -266,11 +278,28 @@ void FasterDepthDataReceiver::handleDepthFrame(
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
 
+    // Create a point cloud containing the artificial endpoints of all pixels in the depth map which are too far away
+    // from the depth sensor.
+    // Please note that this depth data receiver does NOT compute any artificial endpoints (contrary to the initial
+    // depth data receiver) as tests made using the initial depth data receiver have shown that generating artificial
+    // endpoints is in fact not helpful at all (at least when using the depth sensor of the HoloLens 2). As the depth
+    // sensor employed by the HoloLens 2 can't differentiate between points too far away from the sensor and points too
+    // close in front in front of the sensor, the generated artificial endpoints would therefore sometimes falsely
+    // indicate that there is more free space than there is in reality (which caused for voxels to be falsely removed
+    // from the spatial map in the octomap based spatial mapper). It was therefore chosen to leave the calculation of
+    // artificial endpoints out in this depth data receiver which in term also saves some time.
+    // The initialization of an empty point cloud and the conversion to a ROS message is only here for the purpose of
+    // not crashing ROS nodes (i.e. the octomap based spatial mapper at the time of writing this comment) which listen
+    // to published point cloud frame messages and try to access their artificial endpoints.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
+
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     ros::Time time = ros::Time::now();
     sensor_msgs::PointCloud2 pointCloudWorldSpaceMsg;
     sensor_msgs::PointCloud2 artificialEndpointsWorldSpaceMsg;
     pointCloudToMsg(pointCloudWorldSpace, pointCloudWorldSpaceMsg, *sequenceNumber, time, "hololens_world");
+    pointCloudToMsg(artificialEndpointsWorldSpace, artificialEndpointsWorldSpaceMsg, *sequenceNumber, time,
+            "hololens_world");
     publishHololensPosition(depthFrame, hololensPositionPublisher, positionSequenceNumber, time);
     publishHololensCamToWorldTf(depthFrame, hololensCamPublisher, time);
     publishDepthImage(depthMap, depthClusters, pixelDirectionsLookupTable, imagePublisher, *sequenceNumber, time,
@@ -282,7 +311,7 @@ void FasterDepthDataReceiver::handleDepthFrame(
     positionSequenceNumber++;
 }
 
-std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClusters(DepthMap& depthMap)
+std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClustersWithRegionGrowing(DepthMap& depthMap)
 {
     // Generally speaking, this algorithm is quite similar to the voxel clustering implemented in the Octomap based
     // spatial mapper, which in term implemented "an approach similar to a region growing algorithm" described in the
@@ -373,6 +402,68 @@ std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClusters(Dep
                 result.push_back(clusterPixels);
             }
         }
+    }
+
+    return result;
+}
+
+bool enforceDepthSimilarity(const pcl::PointXYZI& pointA, const pcl::PointXYZI& pointB, float squaredDistance)
+{
+    return std::abs(pointA.intensity - pointB.intensity) <= pixelClusteringDepthValueSimilarity;
+}
+
+std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClustersWithPclClustering(DepthMap& depthMap)
+{
+    // Convert the depth map to an organized point cloud.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr depthMapCloud (new pcl::PointCloud<pcl::PointXYZI>());
+    depthMapCloud->width = depthMap.width;
+    depthMapCloud->height = depthMap.height;
+    depthMapCloud->is_dense = true;
+    depthMapCloud->points.resize(depthMap.width * depthMap.height);
+
+    for (uint32_t u = 0; u < depthMap.width; u++)
+    {
+        for (uint32_t v = 0; v < depthMap.height; v++)
+        {
+            pcl::PointXYZI& point = (*depthMapCloud)(u, v);
+
+            point.x = static_cast<float>(u);
+            point.y = static_cast<float>(v);
+            point.z = 0.0f;
+            point.intensity = static_cast<float>(depthMap.valueAt(u, v));
+        }
+    }
+    
+    // Create a vector for storing the detected point indices of each cluster.
+    pcl::IndicesClustersPtr clusters (new pcl::IndicesClusters());
+
+    // Extract the clusters of the point cloud.
+    pcl::ConditionalEuclideanClustering<pcl::PointXYZI> clustering;
+    clustering.setClusterTolerance(pixelClusteringNeighboringPixelDistance);
+    clustering.setConditionFunction(&enforceDepthSimilarity);
+    clustering.setMinClusterSize(pixelClusteringMinClusterSize);
+    clustering.setInputCloud(depthMapCloud);
+    clustering.segment(*clusters);
+
+    // Iterate over all found clusters and add all big enough clusters to the resulting pixels.
+    std::vector<std::vector<Pixel>> result;
+    for (const auto& cluster : (*clusters))
+    {
+        std::vector<Pixel> clusterPixels;
+        clusterPixels.reserve(cluster.indices.size());
+
+        for (const auto& index : cluster.indices)
+        {
+            // This conversion from floats back to integers seems unnecessary given that these floating point values
+            // were previously casted to floats from integer values. There may be a more elegant and more performant
+            // way of solving this problem than performing a type cast...
+            pcl::PointXYZI& point = (*depthMapCloud)[index];
+            uint32_t u = static_cast<uint32_t>(point.x);
+            uint32_t v = static_cast<uint32_t>(point.y);
+            clusterPixels.push_back(Pixel(u, v));
+        }
+
+        result.push_back(clusterPixels);
     }
 
     return result;
