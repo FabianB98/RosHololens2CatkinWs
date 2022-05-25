@@ -28,6 +28,11 @@
 #define VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE 1.9  // The mininum distance between two clusters relative to leaf size.
 #define VOXEL_CLUSTERING_MIN_CLUSTER_SIZE 10            // Discard clusters with less than this amount of voxels.
 
+// Switches and hyper parameters for removal of dynamic voxel clusters containing only sensor noise.
+#define DO_NOISE_CLUSTER_REMOVAL true                           // Whether clusters of sensor noise should be removed.
+#define NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE 1.0    // The distance to neighboring voxels relative to leaf size.
+#define NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE 0.75   // How many voxels of the cluster must have a static neighbor.
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                              ACTUAL CODE STARTS HERE                                               //
@@ -51,10 +56,15 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("floorRemovalRelativeNoiseHeight", floorRemovalRelativeNoiseHeight, FLOOR_REMOVAL_RELATIVE_NOISE_HEIGHT);
     n.param("voxelClusteringRelativeClusterDistance", voxelClusteringRelativeClusterDistance, VOXEL_CLUSTERING_RELATIVE_CLUSTER_DISTANCE);
     n.param("voxelClusteringMinClusterSize", voxelClusteringMinClusterSize, VOXEL_CLUSTERING_MIN_CLUSTER_SIZE);
+    n.param("doNoiseClusterRemoval", doNoiseClusterRemoval, DO_NOISE_CLUSTER_REMOVAL);
+    n.param("noiseClusterRemovalRelativeNeighborDistance", noiseClusterRemovalRelativeNeighborDistance, NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE);
+    n.param("noiseClusterRemovalStaticNeighborPercentage", noiseClusterRemovalStaticNeighborPercentage, NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE);
+    noiseClusterRemovalNoStaticNeighborPercentage = 1.0 - noiseClusterRemovalStaticNeighborPercentage;
 
     // Initialize the array of the neighborhoods to check when filtering voxels and when clustering voxels.
     octreeFilteringNeighborhood = initializeEuclideanDistanceNeighborhood(octreeFilteringRelativeNeighborDistance);
     voxelClusteringNeighborhood = initializeEuclideanDistanceNeighborhood(voxelClusteringRelativeClusterDistance);
+    noiseClusterRemovalNeighborhood = initializeEuclideanDistanceNeighborhood(noiseClusterRemovalRelativeNeighborDistance);
 
     // Define the colors to use for clustering voxel clusters. I'm just going to assume that there will never be more
     // than 16 dynamic objects visible at once. If there will ever be more clusters than that, the assigned colors will
@@ -193,6 +203,10 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     // Cluster all dynamic voxels.
     dynamicObjectsOctree->expand();
     std::vector<std::vector<octomap::point3d>> dynamicObjectClusters = detectVoxelClusters(dynamicObjectsOctree);
+    if (doNoiseClusterRemoval)
+    {
+        dynamicObjectClusters = removeNoiseVoxelClusters(dynamicObjectClusters);
+    }
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
@@ -216,14 +230,20 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
 octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
         const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    // Create an Octomap point cloud containing all points (including all artificial end points).
+    // Create an Octomap point cloud containing all points. In a previous version all artificial endpoints were also
+    // added to this point cloud. However, this brought up more issues than it helped solve (at least when using the
+    // HoloLens 2), so it was decided that artificial endpoints are no longer added to this point cloud.
+    // One specific issue which arises when using artificial endpoints is caused by the fact that the depth sensor
+    // employed by the HoloLens 2 can't differentiate between points too far away from the sensor and points too close
+    // in front of the sensor. Due to this, the generated artificial endpoints would sometimes falsely indicate that
+    // there is more free space than there is in reality, which in term caused occupied voxels to be falsely removed
+    // from the spatial map of static objects.
+    // Furthermore, the HoloLens 2's depth sensor is unable to reliably measure depth values at sharp edges (e.g. at
+    // an edge between a wall and the floor) where it most of the time outputs depth values indicating that the object
+    // is either too close or too far away. These sensor values would then be mapped to an artificial endpoint which is
+    // further away than the actual point, so we would again falsely remove static voxels from the spatial map.
     octomap::Pointcloud pointcloudOctomap = octomap::Pointcloud();
     octomap::pointCloud2ToOctomap(msg->pointCloudWorldSpace, pointcloudOctomap);
-
-    octomap::Pointcloud artificialEndpointsOctomap = octomap::Pointcloud();
-    octomap::pointCloud2ToOctomap(msg->artificialEndpointsWorldSpace, artificialEndpointsOctomap);
-
-    pointcloudOctomap.push_back(artificialEndpointsOctomap);
 
     // Convert the point cloud to an octree.
     octomap::point3d sensorOrigin
@@ -700,6 +720,83 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
             result.push_back(clusterVoxels);
         }
     }
+
+    return result;
+}
+
+std::vector<std::vector<octomap::point3d>> SpatialMapper::removeNoiseVoxelClusters(
+        std::vector<std::vector<octomap::point3d>> voxelClustersToFilter)
+{
+    std::vector<std::vector<octomap::point3d>> result;
+
+    spatialMapMutex.lock();
+
+    for (const auto& cluster : voxelClustersToFilter)
+    {
+        // Determine how many voxels with or without static neighbors we have to find in the current cluster in order to
+        // determine whether the current cluster contains only sensor noise or some object of interest.
+        double clusterSize = static_cast<double>(cluster.size());
+        uint32_t staticNeighborThreshold = static_cast<uint32_t>(
+                std::round(clusterSize * noiseClusterRemovalStaticNeighborPercentage));
+        uint32_t noStaticNeighborThreshold = static_cast<uint32_t>(
+                std::round(clusterSize * noiseClusterRemovalNoStaticNeighborPercentage));
+
+        uint32_t numVoxelsWithStaticNeighbors = 0;
+        uint32_t numVoxelsWithoutStaticNeighbors = 0;
+
+        // Iterate over all voxels of the current cluster and determine whether they are neighboring a static voxel.
+        for (auto voxelIt = cluster.begin(); voxelIt != cluster.end(); ++voxelIt)
+        {
+            for (size_t i = 0; i < noiseClusterRemovalNeighborhood.size(); i++)
+            {
+                const octomap::point3d& voxelCenterPoint = *voxelIt;
+                octomap::point3d neighborCenterPoint = voxelCenterPoint + noiseClusterRemovalNeighborhood[i];
+
+                octomap::OcTreeNode* neighborNode = staticObjectsOctree->search(neighborCenterPoint);
+                if (neighborNode != NULL && staticObjectsOctree->isNodeOccupied(neighborNode)) 
+                {
+                    // The current voxel has a static neighbor.
+                    ++numVoxelsWithStaticNeighbors;
+                    if (numVoxelsWithStaticNeighbors >= staticNeighborThreshold)
+                    {
+                        // I know, I know, goto is considered bad. However, we need to break the outer loop iterating
+                        // over all voxels of the current cluster as we can already safely say that this cluster must
+                        // be a cluster containing only sensor noise. According to https://stackoverflow.com/a/41179682
+                        // using a goto statement seems to be the easiest solution in this case.
+                        goto next_cluster;
+                    }
+
+                    // I know, I know, goto is considered bad. However, we need to continue with the next iteration of
+                    // the outer loop (i.e. the loop iterating over all voxels of the current cluster) as we only want
+                    // to know IF the current voxel has a static neighbor, not how many static neighbors the current
+                    // voxel has. According to https://stackoverflow.com/a/41179682 using a goto statement seems to be
+                    // the easiest solution in this case.
+                    goto next_voxel_neighbor_search;
+                }
+            }
+
+            ++numVoxelsWithoutStaticNeighbors;
+            if (numVoxelsWithoutStaticNeighbors > noStaticNeighborThreshold)
+            {
+                // The current cluster contains too many voxels without a static neighbor, so we can assume that this
+                // cluster contains some object of interest and not only sensor noise.
+                result.push_back(cluster);
+                break;
+            }
+
+            // Label for jumping to the next loop iteration (or for leaving the loop if we're in the last iteration). As
+            // already mentioned, using goto is generally considered bad, but we need this in this case for continuing
+            // the current loop iterating over all voxels of the current cluster from an inner loop.
+            next_voxel_neighbor_search:;
+        }
+
+        // Label for jumping to the next loop iteration (or for leaving the loop if we're in the last iteration). As
+        // already mentioned, using goto is generally considered bad, but we need this in this case for continuing
+        // the current loop iterating over all clusters from an inner loop.
+        next_cluster:;
+    }
+
+    spatialMapMutex.unlock();
 
     return result;
 }

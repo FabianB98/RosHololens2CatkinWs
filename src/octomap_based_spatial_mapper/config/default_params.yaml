@@ -17,9 +17,14 @@ numFramesBeforePossibleDynamicVoxelRemoval: 10
 
 # Hyper parameters for floor removal in voxels of dynamic objects.
 doFloorRemovalInDynamicVoxels: true
-floorRemovalMinFloorVoxels: 25
+floorRemovalMinFloorVoxels: 400 # With a leaf size of 5 cm a face of each voxel spans an area of 25 cm² (or 0.0025 m²). Assuming that the floor is completely flat, a minimum amount of floor voxels of 400 means that we must find at least 1 m² of potential floor in order for the voxels to be considered the new floor height.
 floorRemovalRelativeNoiseHeight: 1
 
 # Hyper parameters for clustering dynamic voxels.
 voxelClusteringRelativeClusterDistance: 1.9
-voxelClusteringMinClusterSize: 8  # With a leaf size of 5 cm each voxel holds a volume of 125cm³. A minimum cluster size of 8 results in a removal of all clusters smaller than 1000cm³ (or 1 liter).
+voxelClusteringMinClusterSize: 8  # With a leaf size of 5 cm each voxel holds a volume of 125 cm³. A minimum cluster size of 8 results in a removal of all clusters smaller than 1000cm³ (or 1 liter).
+
+# Switches and hyper parameters for removal of dynamic voxel clusters containing only sensor noise.
+doNoiseClusterRemoval: true
+noiseClusterRemovalRelativeNeighborDistance: 1.0
+noiseClusterRemovalStaticNeighborPercentage: 0.75

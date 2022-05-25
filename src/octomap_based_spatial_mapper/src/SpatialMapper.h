@@ -1,3 +1,4 @@
+#include <cmath>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -152,6 +153,11 @@ private:
     // Detects clusters in the given octree (must be expanded and may only contain occupied and unknown voxels).
     std::vector<std::vector<octomap::point3d>> detectVoxelClusters(octomap::OcTree* octreeToCluster);
 
+    // Removes clusters which were very likely detected due to sensor noise. These noisy clusters usually appear next
+    // to static objects with most voxels being a neighbor to a static voxel, so they will be filtered out accordingly.
+    std::vector<std::vector<octomap::point3d>> removeNoiseVoxelClusters(
+            std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+
     // Creates a colorized octree where a voxels belonging to the same cluster will have the same color.
     octomap::ColorOcTree* createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters);
 
@@ -198,6 +204,13 @@ private:
     int voxelClusteringMinClusterSize;
     std::vector<octomap::point3d> voxelClusteringNeighborhood;
     std::vector<octomap::ColorOcTreeNode::Color> voxelClusterColors;
+
+    // Switches and hyper parameters for removal of dynamic voxel clusters containing only sensor noise.
+    bool doNoiseClusterRemoval;
+    double noiseClusterRemovalRelativeNeighborDistance;
+    double noiseClusterRemovalStaticNeighborPercentage;
+    double noiseClusterRemovalNoStaticNeighborPercentage;
+    std::vector<octomap::point3d> noiseClusterRemovalNeighborhood;
 
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
