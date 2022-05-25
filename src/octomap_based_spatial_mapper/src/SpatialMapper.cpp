@@ -838,5 +838,6 @@ void SpatialMapper::clearSpatialMap()
     staticObjectsOctree = new octomap::OcTree(leafSize);
     spatialMapMutex.unlock();
 
+    octomapSequenceNumber++;
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, ros::Time::now());
 }
