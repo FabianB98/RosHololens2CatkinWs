@@ -55,8 +55,16 @@ protected:
         const hololens_msgs::DepthFrame::ConstPtr& depthFrame);
 
     // Downsamples a given point cloud.
+    // I don't understand why, but as soon as I try to use any PCL filter or algorithm (such as the VoxelGrid used for
+    // downsampling for example) inside a templated function I get a ton of compiler errors stating that the filter
+    // either is no member of pcl or is not templated (even though the PCL documentation literally states VoxelGrid to
+    // be templated as VoxelGrid<PointT>...). These errors don't make any sense at all and I don't know how to resolve
+    // them, so I'll just have to resort to duplicating these functions...
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsamplePointCloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
+        const float leafSize);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr downsamplePointCloud(
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
         const float leafSize);
     
     // Removes outliers from a given point cloud with a radius outlier removal filter.
@@ -84,8 +92,20 @@ protected:
         uint32_t sequenceNumber,
         const ros::Time& timestamp,
         const std::string frameId);
+    void pointCloudToMsg(
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+        sensor_msgs::PointCloud2& message,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const std::string frameId);
     void publishPointCloud(
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+        const ros::Publisher& publisher,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const std::string frameId);
+    void publishPointCloud(
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
         const ros::Publisher& publisher,
         uint32_t sequenceNumber,
         const ros::Time& timestamp,

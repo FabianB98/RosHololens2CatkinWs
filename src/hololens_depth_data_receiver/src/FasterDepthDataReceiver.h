@@ -42,9 +42,10 @@ private:
 
     // Reconstructs a point cloud from the data stored in the given depth map for all pixels which are part of any of
     // the given clusters.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr createPointCloudFromClusters(
+    pcl::PointCloud<pcl::PointXYZI>::Ptr createPointCloudFromClusters(
         const std::vector<std::vector<Pixel>>& depthClusters,
         DepthMap& depthMap,
+        DepthMap& reflectivityImage,
         const std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>& pixelDirectionsLookupTable,
         const float minDepth,
         const float minReliableDepth,

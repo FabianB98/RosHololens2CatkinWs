@@ -264,18 +264,23 @@ void FasterDepthDataReceiver::handleDepthFrame(
     DepthMap depthMap = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight,
             depthFrame->depthMapPixelStride, false);
 
+    // Decode the reflectivity image.
+    decoded = base64_decode(depthFrame->base64encodedReflectivity);
+    DepthMap reflectivityImage = DepthMap(decoded, depthFrame->depthMapWidth, depthFrame->depthMapHeight,
+            depthFrame->reflectivityPixelStride, false);
+
     // Detect clusters of pixels with similar depth values in the depth map.
     std::vector<std::vector<Pixel>> depthClusters = pixelClusteringUsePcl
             ? detectDepthClustersWithPclClustering(depthMap)
             : detectDepthClustersWithRegionGrowing(depthMap);
 
     // Reconstruct a point cloud from all pixels which were assigned to a cluster.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace = createPointCloudFromClusters(depthClusters, depthMap,
-            pixelDirectionsLookupTable, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace = createPointCloudFromClusters(depthClusters, depthMap,
+            reflectivityImage, pixelDirectionsLookupTable, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
 
     // Calculate the transformation from camera space to world space and transform the point cloud.
     Eigen::Matrix4f camToWorld = computeCamToWorldFromDepthFrame(depthFrame);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
 
     // Create a point cloud containing the artificial endpoints of all pixels in the depth map which are too far away
@@ -291,7 +296,7 @@ void FasterDepthDataReceiver::handleDepthFrame(
     // The initialization of an empty point cloud and the conversion to a ROS message is only here for the purpose of
     // not crashing ROS nodes (i.e. the octomap based spatial mapper at the time of writing this comment) which listen
     // to published point cloud frame messages and try to access their artificial endpoints.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
 
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     ros::Time time = ros::Time::now();
@@ -469,19 +474,20 @@ std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClustersWith
     return result;
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr FasterDepthDataReceiver::createPointCloudFromClusters(
+pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFromClusters(
         const std::vector<std::vector<Pixel>>& depthClusters,
         DepthMap& depthMap,
+        DepthMap& reflectivityImage,
         const std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>>& pixelDirectionsLookupTable,
         const float minDepth,
         const float minReliableDepth,
         const float maxReliableDepth,
         const float maxDepth)
 {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
     for (auto clusterIt = depthClusters.begin(); clusterIt != depthClusters.end(); ++clusterIt)
     {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr clusterCloud (new pcl::PointCloud<pcl::PointXYZ>());
+        pcl::PointCloud<pcl::PointXYZI>::Ptr clusterCloud (new pcl::PointCloud<pcl::PointXYZI>());
         for (auto pixelIt = clusterIt->begin(); pixelIt != clusterIt->end(); ++pixelIt)
         {
             // Get the depth at the current pixel.
@@ -502,15 +508,22 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FasterDepthDataReceiver::createPointCloudFro
             if (dir == nullptr)
                 continue;
 
+            // Get the intensity of the current pixel.
+            float reflectivity = static_cast<float>(reflectivityImage.valueAt(*pixelIt));
+
             // Calculate the point for the current pixel based on the pixel's depth value.
-            pcl::PointXYZ point = pcl::PointXYZ(dir->direction.x * depth, dir->direction.y * depth, dir->direction.z * depth);
+            pcl::PointXYZI point;
+            point.x = dir->direction.x * depth;
+            point.y = dir->direction.y * depth;
+            point.z = dir->direction.z * depth;
+            point.intensity = reflectivity;
             clusterCloud->push_back(point);
         }
 
         // Downsampling each cluster individually (instead of the whole point cloud containing all clusters) avoids
         // comparing points which are already known to be too far apart. This should in theory be a bit faster than
         // downsampling the complete point cloud at once.
-        pcl::PointCloud<pcl::PointXYZ>::Ptr clusterCloudDownsampled 
+        pcl::PointCloud<pcl::PointXYZI>::Ptr clusterCloudDownsampled 
                 = downsamplePointCloud(clusterCloud, downsamplingLeafSize);
 
         // Combine all clusters into a single point cloud.

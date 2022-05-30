@@ -1,6 +1,8 @@
 int32 depthMapWidth
 int32 depthMapHeight
 int32 depthMapPixelStride
+int32 reflectivityPixelStride
 string base64encodedDepthMap
+string base64encodedReflectivity
 Point camToWorldTranslation
 Quaternion camToWorldRotation

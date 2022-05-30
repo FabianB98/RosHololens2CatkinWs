@@ -46,6 +46,11 @@ Eigen::Matrix4f DepthDataReceiver::computeCamToWorldFromDepthFrame(
     return camToWorld;
 }
 
+// I don't understand why, but as soon as I try to use any PCL filter or algorithm (such as the VoxelGrid used for
+// downsampling for example) inside a templated function I get a ton of compiler errors stating that the filter either
+// is no member of pcl or is not templated (even though the PCL documentation literally states VoxelGrid to be templated
+// as VoxelGrid<PointT>...). These errors don't make any sense at all and I don't know how to resolve them, so I'll just
+// just have to resort to duplicating these functions...
 pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::downsamplePointCloud(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
     const float leafSize)
@@ -55,6 +60,23 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::downsamplePointCloud(
 
     // Downsample the given point cloud using a voxel grid filter.
     pcl::VoxelGrid<pcl::PointXYZ> voxelGrid;
+    voxelGrid.setInputCloud(pointCloudToDownsample);
+    voxelGrid.setLeafSize(leafSize, leafSize, leafSize);
+    voxelGrid.filter(*pointCloudDownsampled);
+
+    // Return the downsampled point cloud.
+    return pointCloudDownsampled;
+}
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr DepthDataReceiver::downsamplePointCloud(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
+    const float leafSize)
+{
+    // Create a point cloud in which we will store the results.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudDownsampled (new pcl::PointCloud<pcl::PointXYZI>());
+
+    // Downsample the given point cloud using a voxel grid filter.
+    pcl::VoxelGrid<pcl::PointXYZI> voxelGrid;
     voxelGrid.setInputCloud(pointCloudToDownsample);
     voxelGrid.setLeafSize(leafSize, leafSize, leafSize);
     voxelGrid.filter(*pointCloudDownsampled);
@@ -156,8 +178,37 @@ void DepthDataReceiver::pointCloudToMsg(
     message.header.frame_id = frameId;
 }
 
+void DepthDataReceiver::pointCloudToMsg(
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+    sensor_msgs::PointCloud2& message,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
+{
+    // Create the ROS message for the point cloud and store the point cloud inside it.
+    pcl::toROSMsg(*cloud, message);
+
+    // Set the header of the message.
+    message.header.seq = sequenceNumber;
+    message.header.stamp = timestamp;
+    message.header.frame_id = frameId;
+}
+
 void DepthDataReceiver::publishPointCloud(
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+    const ros::Publisher& publisher,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
+{
+    sensor_msgs::PointCloud2 pointCloudMessage;
+    pointCloudToMsg(cloud, pointCloudMessage, sequenceNumber, timestamp, frameId);
+
+    publisher.publish(pointCloudMessage);
+}
+
+void DepthDataReceiver::publishPointCloud(
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
     const ros::Publisher& publisher,
     uint32_t sequenceNumber,
     const ros::Time& timestamp,
