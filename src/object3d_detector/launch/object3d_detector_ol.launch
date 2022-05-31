@@ -1,0 +1,25 @@
+<launch>
+  <!-- HoloLens depth data receiver -->
+  <include file="$(find hololens_depth_data_receiver)/launch/depth_data_receiver.launch"/>
+  <node name="hololens_rviz_tf1" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0 1.5707963 /odom /hololens_world 100"/>
+  <node name="hololens_rviz_tf2" pkg="tf" type="static_transform_publisher" args="0 0 0 -1.5707963 0 0 /hololens /odom 100"/>
+  
+  <!-- FLOBOT 3D Object Detector -->
+  <node pkg="object3d_detector" type="object3d_detector_ol" name="object3d_detector_ol" output="screen" respawn="false">
+    <param name="print_fps" type="bool" value="false"/>
+    <param name="frame_id" type="string" value="odom"/>
+    
+    <!-- These limits were specifically tuned to remove the floor and the roof in the robot hall at the IPR. Depending on the origin of the HoloLens's coordinate system and the ceiling height, these values may need to be changed. -->
+    <param name="z_limit_min" type="double" value="-1.1"/>
+    <param name="z_limit_max" type="double" value="1.8"/>
+  </node>
+  
+  <!-- NBellotto's Bayes People Tracker -->
+  <rosparam command="load" file="$(find object3d_detector)/config/object3d_detector_ol.yaml"/>
+  <node pkg="bayes_people_tracker" type="bayes_people_tracker_ol" name="bayes_people_tracker_ol" output="screen" respawn="false">
+    <param name="base_link" type="string" value="odom"/>
+    <param name="target_frame" type="string" value="odom"/>
+  </node>
+  
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find object3d_detector)/launch/object3d_detector_ol.rviz"/>
+</launch>
