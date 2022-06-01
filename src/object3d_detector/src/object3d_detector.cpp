@@ -7,8 +7,12 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/sample_consensus/ransac.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <pcl/common/angles.h>
 #include <pcl/common/centroid.h>
 #include <pcl/common/common.h>
 #include <pcl/common/pca.h>
@@ -76,8 +80,9 @@ public:
 };
 
 Object3dDetector::Object3dDetector() {
-  point_cloud_sub_ = node_handle_.subscribe<sensor_msgs::PointCloud2>("velodyne_points", 1, &Object3dDetector::pointCloudCallback, this);
-  
+  //point_cloud_sub_ = node_handle_.subscribe<sensor_msgs::PointCloud2>("velodyne_points", 1, &Object3dDetector::pointCloudCallback, this);
+  point_cloud_sub_ = node_handle_.subscribe<sensor_msgs::PointCloud2>("hololensLongThrowPointCloudWorldSpace", 1, &Object3dDetector::pointCloudCallback, this);
+
   ros::NodeHandle private_nh("~");
   marker_array_pub_ = private_nh.advertise<visualization_msgs::MarkerArray>("markers", 100);
   pose_array_pub_ = private_nh.advertise<geometry_msgs::PoseArray>("poses", 100);
@@ -142,8 +147,15 @@ int frames; clock_t start_time; bool reset = true;//fps
 void Object3dDetector::pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& ros_pc2) {
   if(print_fps_)if(reset){frames=0;start_time=clock();reset=false;}//fps
   
-  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc(new pcl::PointCloud<pcl::PointXYZI>);
-  pcl::fromROSMsg(*ros_pc2, *pcl_pc);
+  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc_hololens(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::fromROSMsg(*ros_pc2, *pcl_pc_hololens);
+
+  // The HoloLens uses a slightly different coordinate system. Up corresponds to the y-axis instead of the z-axis.
+  // We need to transform the point cloud accordingly such that the coordinate systems match up.
+  Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
+  hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
+  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
   
   extractCluster(pcl_pc);
   classify();
@@ -151,16 +163,100 @@ void Object3dDetector::pointCloudCallback(const sensor_msgs::PointCloud2::ConstP
   if(print_fps_)if(++frames>10){std::cerr<<"[object3d_detector]: fps = "<<float(frames)/(float(clock()-start_time)/CLOCKS_PER_SEC)<<", timestamp = "<<clock()/CLOCKS_PER_SEC<<std::endl;reset = true;}//fps
 }
 
+float floor_height = 0.0;
+float ceiling_height = 0.0;
+const float floor_ceiling_update_threshold = 0.15;
+const float floor_ceiling_noise_threshold = 0.1;
+const int min_points_in_floor_ceiling = 5000;
+
 const int nested_regions_ = 14;
 int zone_[nested_regions_] = {2,3,3,3,3,3,3,2,3,3,3,3,3,3}; // for more details, see our IROS'17 paper.
 void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc) {
   features_.clear();
   
+  float min_z_in_frame = 0.0;
+  float max_z_in_frame = 0.0;
+  for (int i = 0; i < pc->size(); i++) {
+    float point_height = (*pc)[i].z;
+    min_z_in_frame = std::min(point_height, min_z_in_frame);
+    max_z_in_frame = std::max(point_height, max_z_in_frame);
+  }
+
+  if (min_z_in_frame < floor_height - floor_ceiling_update_threshold) {
+    // There are points more than 15 cm below the currently assumed floor height. Check for a plane at that height.
+    pcl::IndicesPtr point_indices_below_floor_height(new std::vector<int>);
+    pcl::PassThrough<pcl::PointXYZI> pass;
+    pass.setInputCloud(pc);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(min_z_in_frame - floor_ceiling_noise_threshold, floor_height - floor_ceiling_noise_threshold);
+    pass.filter(*point_indices_below_floor_height);
+
+    if (point_indices_below_floor_height->size() >= min_points_in_floor_ceiling) {
+      pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+      pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+      pcl::SACSegmentation<pcl::PointXYZI> seg;
+      seg.setOptimizeCoefficients(true);
+      seg.setMethodType(pcl::SAC_RANSAC);
+      seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+      seg.setDistanceThreshold(0.01);
+      seg.setAxis(Eigen::Vector3f::UnitZ());
+      seg.setEpsAngle(pcl::deg2rad(5.0));
+      seg.setMaxIterations(1000);
+      seg.setInputCloud(pc);
+      seg.setIndices(point_indices_below_floor_height);
+      seg.segment(*inliers, *coefficients);
+
+      if (inliers->indices.size() >= min_points_in_floor_ceiling) {
+        float plane_height = -coefficients->values[2] * coefficients->values[3]; // = -z * d
+        float new_floor_height = plane_height + floor_ceiling_noise_threshold;
+        if (new_floor_height < floor_height) {
+          floor_height = new_floor_height;
+          ROS_INFO("Updated floor height to %f", floor_height);
+        }
+      }
+    }
+  }
+
+  if (max_z_in_frame > ceiling_height + floor_ceiling_update_threshold) {
+    // There are points more than 15 cm above the currently assumed ceiling height. Check for a plane at that height.
+    pcl::IndicesPtr point_indices_above_ceiling_height(new std::vector<int>);
+    pcl::PassThrough<pcl::PointXYZI> pass;
+    pass.setInputCloud(pc);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(ceiling_height + floor_ceiling_noise_threshold, max_z_in_frame + floor_ceiling_noise_threshold);
+    pass.filter(*point_indices_above_ceiling_height);
+
+    if (point_indices_above_ceiling_height->size() >= min_points_in_floor_ceiling) {
+      pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+      pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+      pcl::SACSegmentation<pcl::PointXYZI> seg;
+      seg.setOptimizeCoefficients(true);
+      seg.setMethodType(pcl::SAC_RANSAC);
+      seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+      seg.setDistanceThreshold(0.01);
+      seg.setAxis(Eigen::Vector3f::UnitZ());
+      seg.setEpsAngle(pcl::deg2rad(5.0));
+      seg.setMaxIterations(1000);
+      seg.setInputCloud(pc);
+      seg.setIndices(point_indices_above_ceiling_height);
+      seg.segment(*inliers, *coefficients);
+
+      if (inliers->indices.size() >= min_points_in_floor_ceiling) {
+        float plane_height = -coefficients->values[2] * coefficients->values[3]; // = -z * d
+        float new_ceiling_height = plane_height - floor_ceiling_noise_threshold;
+        if (new_ceiling_height > ceiling_height) {
+          ceiling_height = new_ceiling_height;
+          ROS_INFO("Updated ceiling height to %f", ceiling_height);
+        }
+      }
+    }
+  }
+
   pcl::IndicesPtr pc_indices(new std::vector<int>);
   pcl::PassThrough<pcl::PointXYZI> pass;
   pass.setInputCloud(pc);
   pass.setFilterFieldName("z");
-  pass.setFilterLimits(z_limit_min_, z_limit_max_);
+  pass.setFilterLimits(floor_height, ceiling_height);
   pass.filter(*pc_indices);
   
   boost::array<std::vector<int>, nested_regions_> indices_array;

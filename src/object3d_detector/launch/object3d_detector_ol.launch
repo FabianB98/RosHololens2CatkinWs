@@ -8,10 +8,6 @@
   <node pkg="object3d_detector" type="object3d_detector_ol" name="object3d_detector_ol" output="screen" respawn="false">
     <param name="print_fps" type="bool" value="false"/>
     <param name="frame_id" type="string" value="odom"/>
-    
-    <!-- These limits were specifically tuned to remove the floor and the roof in the robot hall at the IPR. Depending on the origin of the HoloLens's coordinate system and the ceiling height, these values may need to be changed. -->
-    <param name="z_limit_min" type="double" value="-1.1"/>
-    <param name="z_limit_max" type="double" value="1.8"/>
   </node>
   
   <!-- NBellotto's Bayes People Tracker -->
