@@ -18,6 +18,8 @@
 #include <pcl/common/pca.h>
 // SVM
 #include "svm.h"
+// Point cloud frame message (contains point cloud and sensor position).
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 
 typedef struct feature {
   /*** for visualization ***/
@@ -95,10 +97,10 @@ public:
   Object3dDetector();
   ~Object3dDetector();
   
-  void pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& ros_pc2);
+  void pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
   void trajectoryCallback(const geometry_msgs::PoseArray::ConstPtr& trajectory);
 
-  void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc);
+  void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position);
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f);
   void saveFeature(Feature &f, struct svm_node *x);
   void classify();
@@ -174,7 +176,7 @@ Object3dDetector::Object3dDetector() {
   
   /*** Subscribers ***/
   //point_cloud_sub_ = node_handle_.subscribe<sensor_msgs::PointCloud2>("velodyne_points", 100, &Object3dDetector::pointCloudCallback, this);
-  point_cloud_sub_ = node_handle_.subscribe<sensor_msgs::PointCloud2>("hololensLongThrowPointCloudWorldSpace", 5, &Object3dDetector::pointCloudCallback, this);
+  point_cloud_sub_ = node_handle_.subscribe<hololens_depth_data_receiver_msgs::PointCloudFrame>("hololensLongThrowPointCloudFrame", 5, &Object3dDetector::pointCloudCallback, this);
   trajectory_sub_ = node_handle_.subscribe<geometry_msgs::PoseArray>("people_tracker/trajectory", 5, &Object3dDetector::trajectoryCallback, this);
 }
 
@@ -243,11 +245,14 @@ void Object3dDetector::trajectoryCallback(const geometry_msgs::PoseArray::ConstP
 }
 
 int frames; clock_t start_time; bool reset = true;//fps
-void Object3dDetector::pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& ros_pc2) {
+void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg) {
   if(print_fps_)if(reset){frames=0;start_time=clock();reset=false;}//fps
   
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc_hololens(new pcl::PointCloud<pcl::PointXYZI>);
-  pcl::fromROSMsg(*ros_pc2, *pcl_pc_hololens);
+  pcl::fromROSMsg(msg->pointCloudWorldSpace, *pcl_pc_hololens);
+
+  pcl::PointXYZ sensor_position
+      = pcl::PointXYZ(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
 
   // The HoloLens uses a slightly different coordinate system. Up corresponds to the y-axis instead of the z-axis.
   // We need to transform the point cloud accordingly such that the coordinate systems match up.
@@ -256,7 +261,7 @@ void Object3dDetector::pointCloudCallback(const sensor_msgs::PointCloud2::ConstP
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
   
-  extractCluster(pcl_pc);
+  extractCluster(pcl_pc, sensor_position);
   classify();
   train();
   
@@ -271,7 +276,7 @@ const int min_points_in_floor_ceiling = 5000;
 
 const int nested_regions_ = 14;
 int zone_[nested_regions_] = {2,3,3,3,3,3,3,2,3,3,3,3,3,3}; // for more details, see our IROS'17 paper.
-void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc) {
+void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position) {
   features_.clear();
   
   float min_z_in_frame = 0.0;
@@ -369,14 +374,18 @@ void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc) {
   
   boost::array<std::vector<int>, nested_regions_> indices_array;
   for(int i = 0; i < pc_indices->size(); i++) {
+    const pcl::PointXYZI& point = (*pc_indices)[i];
+    pcl::PointXYZ diff_to_sensor_position;
+    diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
+    float d2 = diff_to_sensor_position.x * diff_to_sensor_position.x +
+        diff_to_sensor_position.y * diff_to_sensor_position.y +
+        diff_to_sensor_position.z * diff_to_sensor_position.z;
+
     float range = 0.0;
     for(int j = 0; j < nested_regions_; j++) {
-      float d2 = pc->points[(*pc_indices)[i]].x * pc->points[(*pc_indices)[i]].x +
-	pc->points[(*pc_indices)[i]].y * pc->points[(*pc_indices)[i]].y +
-	pc->points[(*pc_indices)[i]].z * pc->points[(*pc_indices)[i]].z;
       if(d2 > range*range && d2 <= (range+zone_[j])*(range+zone_[j])) {
-	indices_array[j].push_back((*pc_indices)[i]);
-	break;
+      	indices_array[j].push_back((*pc_indices)[i]);
+      	break;
       }
       range += zone_[j];
     }

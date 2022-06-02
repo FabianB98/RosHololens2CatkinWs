@@ -1,7 +1,16 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(object3d_detector)
 
-find_package(catkin REQUIRED COMPONENTS roscpp sensor_msgs visualization_msgs geometry_msgs pcl_conversions pcl_ros bayes_tracking)
+find_package(catkin REQUIRED COMPONENTS 
+  roscpp
+  sensor_msgs
+  visualization_msgs
+  geometry_msgs
+  pcl_conversions
+  pcl_ros
+  bayes_tracking
+  hololens_depth_data_receiver_msgs
+)
 
 find_package(PCL REQUIRED)
 
