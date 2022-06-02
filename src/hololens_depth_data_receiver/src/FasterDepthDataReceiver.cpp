@@ -484,6 +484,9 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFr
         const float maxReliableDepth,
         const float maxDepth)
 {
+    // A scaling factor for scaling reflectivity values into the range [0, 255].
+    float activeBrightnessScalingFactor = 1.0 / pow(2.0, static_cast<float>((reflectivityImage.pixelStride - 1) * 8));
+
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
     for (auto clusterIt = depthClusters.begin(); clusterIt != depthClusters.end(); ++clusterIt)
     {
@@ -508,8 +511,12 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFr
             if (dir == nullptr)
                 continue;
 
-            // Get the intensity of the current pixel.
-            float reflectivity = static_cast<float>(reflectivityImage.valueAt(*pixelIt));
+            // Get the active brightness of the current pixel, scale it to fit into the range [0, 255] and try to
+            // compensate for intensity falloff for longer distances caused by the inverse-square law in order to
+            // roughly estimate the reflectivity at the current pixel.
+            uint32_t activeBrightnessValue = reflectivityImage.valueAt(*pixelIt);
+            float activeBrightnessScaled = static_cast<float>(activeBrightnessValue) * activeBrightnessScalingFactor;
+            float reflectivity = activeBrightnessScaled * (depth * depth);
 
             // Calculate the point for the current pixel based on the pixel's depth value.
             pcl::PointXYZI point;
