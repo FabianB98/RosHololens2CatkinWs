@@ -1,0 +1,12 @@
+int32 imageWidthLeft
+int32 imageWidthRight
+int32 imageHeightLeft
+int32 imageHeightRight
+int32 pixelStrideLeft
+int32 pixelStrideRight
+string base64encodedImageLeft
+string base64encodedImageRight
+Point camToWorldTranslationLeft
+Point camToWorldTranslationRight
+Quaternion camToWorldRotationLeft
+Quaternion camToWorldRotationRight

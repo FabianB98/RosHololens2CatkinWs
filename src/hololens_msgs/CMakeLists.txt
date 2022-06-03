@@ -55,6 +55,8 @@ add_message_files(
   PixelDirections.msg
   Point.msg
   Quaternion.msg
+  StereoCameraFrame.msg
+  StereoPixelDirections.msg
 )
 
 ## Generate services in the 'srv' folder
