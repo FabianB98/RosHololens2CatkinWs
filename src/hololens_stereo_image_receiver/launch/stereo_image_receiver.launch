@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+
+    <node name="stereo_image_receiver" pkg="hololens_stereo_image_receiver" type="stereo_image_receiver"/>
+</launch>
