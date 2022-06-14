@@ -1,0 +1,24 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#    Default configuration file for the stereo image receiver.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Parameters for OpenCV's StereoSGBM algorithm.
+sgbmMinDisparity: 0
+sgbmNumDisparities: 96
+sgbmBlockSize: 9
+sgbmP1Multiplier: 8
+sgbmP2Multiplier: 32
+sgbmDisp12MaxDiff: 50
+sgbmPreFilterCap: 0
+sgbmUniquenessRatio: 15
+sgbmSpeckleWindowSize: 100
+sgbmSpeckleRange: 2
+sgbmUseModeHH: true
+
+# Parameters for OpenCV's DisparityWLSFilter.
+wlsLambda: 8000.0
+wlsSigma: 1.2
+
+# Parameters for the disparity map visualization.
+dispVisMultiplier: 2.0
+dispVisVisualizeRawDisparityMap: false

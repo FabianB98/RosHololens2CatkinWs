@@ -12,7 +12,9 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   tf
+  cv_bridge
 )
+find_package(OpenCV)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -119,6 +121,7 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -152,7 +155,7 @@ include_directories(
 # )
 
 add_executable(stereo_image_receiver src/Main.cpp src/StereoImageReceiver.cpp src/Image.cpp src/Pixel.cpp src/Base64.cpp)
-target_link_libraries(stereo_image_receiver ${catkin_LIBRARIES})
+target_link_libraries(stereo_image_receiver ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 #############
 ## Install ##

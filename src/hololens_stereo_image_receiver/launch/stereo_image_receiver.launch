@@ -1,5 +1,6 @@
 <launch>
     <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
 
+    <rosparam file="$(find hololens_stereo_image_receiver)/config/default_parameters.yaml"/>
     <node name="stereo_image_receiver" pkg="hololens_stereo_image_receiver" type="stereo_image_receiver"/>
 </launch>

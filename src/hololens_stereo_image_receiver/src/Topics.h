@@ -5,6 +5,7 @@
 
 #define STEREO_IMAGE_LEFT_TOPIC "hololensStereoImageLeft"
 #define STEREO_IMAGE_RIGHT_TOPIC "hololensStereoImageRight"
+#define DISPARITY_MAP_TOPIC "disparityMap"
 
 #define STEREO_CAM_LEFT_POSITION_TOPIC "hololensStereoCamPositionLeft"
 #define STEREO_CAM_RIGHT_POSITION_TOPIC "hololensStereoCamPositionRight"
