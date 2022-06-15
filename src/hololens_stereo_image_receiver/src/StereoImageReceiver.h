@@ -8,6 +8,7 @@
 #include "std_msgs/Header.h"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
+#include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/PointStamped.h"
 
 #include "hololens_msgs/PixelDirection.h"
@@ -25,6 +26,10 @@
 #include "opencv2/highgui.hpp"
 #include "opencv2/core/utility.hpp"
 #include "opencv2/ximgproc.hpp"
+
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 class StereoImageReceiver
 {
@@ -94,6 +99,7 @@ private:
     ros::Publisher stereoCamLeftPositionPublisher;
     ros::Publisher stereoCamRightPositionPublisher;
     ros::Publisher hololensPositionPublisher;
+    ros::Publisher pointCloudPublisher;
     tf::TransformBroadcaster hololensCamLeftPublisher;
     tf::TransformBroadcaster hololensCamRightPublisher;
 

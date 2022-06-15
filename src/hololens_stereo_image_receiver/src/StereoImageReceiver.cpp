@@ -1,5 +1,12 @@
 #include "StereoImageReceiver.h"
 
+// A compile time switch which defines whether the raw images should be saved to disk. This doesn't need to be a
+// parameter which can be configured over a parameter file, as the images only need to be saved once for camera
+// calibration.
+#define SAVE_IMAGES_TO_DISK false
+// Hardcoding file paths is definitely not a good idea, but using ~ in the path didn't work...
+#define IMAGE_PATH_PREFIX "/home/boesing_uvrtq/stereoCameraImgs/"
+
 StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
 {
     ROS_INFO("Creating StereoImageReceiver...");
@@ -42,8 +49,10 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     stereoCamLeftPositionPublisher = n.advertise<geometry_msgs::PointStamped>(STEREO_CAM_LEFT_POSITION_TOPIC, 10);
     stereoCamRightPositionPublisher = n.advertise<geometry_msgs::PointStamped>(STEREO_CAM_RIGHT_POSITION_TOPIC, 10);
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(HOLOLENS_POSITION_TOPIC, 10);
+    pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(POINT_CLOUD_TOPIC, 10);
 
     stereoPixelDirections = hololens_msgs::StereoPixelDirections::Ptr(new hololens_msgs::StereoPixelDirections());
+    sequenceNumber = 0;
 }
 
 void StereoImageReceiver::handleStereoPixelDirections(const hololens_msgs::StereoPixelDirections::ConstPtr& msg)
@@ -75,6 +84,18 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     Image imageLeft = Image(decodedLeft, msg->imageWidthLeft, msg->imageHeightLeft, msg->pixelStrideLeft, false);
     Image imageRight = Image(decodedRight, msg->imageWidthRight, msg->imageHeightRight, msg->pixelStrideRight, false);
 
+    // Determine the HoloLens's position within its world coordinate system.
+    const hololens_msgs::Point& translationLeft = msg->camToWorldTranslationLeft;
+    const hololens_msgs::Point& translationRight = msg->camToWorldTranslationRight;
+    hololens_msgs::Point translationCenter;
+    translationCenter.x = (translationLeft.x + translationRight.x) / 2.0;
+    translationCenter.y = (translationLeft.y + translationRight.y) / 2.0;
+    translationCenter.z = (translationLeft.z + translationRight.z) / 2.0;
+    float distX = translationLeft.x - translationRight.x;
+    float distY = translationLeft.y - translationRight.y;
+    float distZ = translationLeft.z - translationRight.z;
+    float baselineDistance = sqrt(distX * distX + distY * distY + distZ * distZ);
+
     // Convert the two images to sensor_msgs::Image instances.
     ros::Time time = ros::Time::now();
     sensor_msgs::Image imageMsgLeft = imageToMsg(imageLeft, "hololens_stereo_cam_left", sequenceNumber, time);
@@ -94,6 +115,19 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     cv::transpose(imageRightOpenCV->image, imageRightOpenCVUpright);
     cv::flip(imageRightOpenCVUpright, imageRightOpenCVUpright, 0);
 
+    // Save the raw images to disk (for calibrating the cameras)
+    if (SAVE_IMAGES_TO_DISK)
+    {
+        std::string pathPrefix = std::string(IMAGE_PATH_PREFIX);
+        std::string fileName = std::to_string(sequenceNumber);
+        std::string leftPath = pathPrefix + "left/" + fileName + ".png";
+        std::string rightPath = pathPrefix + "right/" + fileName + ".png";
+        cv::imwrite(leftPath.c_str(), imageLeftOpenCVUpright);
+        cv::imwrite(rightPath.c_str(), imageRightOpenCVUpright);
+    }
+
+    // TODO: Check whether the images are already rectified by the HoloLens or whether this needs to be done here.
+
     // Perform stereo matching using semi-global matching (SGM). Somewhat copied (and modified) from copied from
     // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat leftDisparity, rightDisparity;
@@ -104,6 +138,57 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat filteredDisparity;
     wlsFilter->filter(leftDisparity, imageLeftOpenCVUpright, filteredDisparity, rightDisparity);
+
+    // Rotate the filtered disparity map by 90 degrees counterclockwise such that it matches with the raw image data
+    // obtained by the left camera. This is done to allow for an easier access to the received pixel directions.
+    cv::Mat filteredDisparityInLeftCamCoordSystem;
+    cv::transpose(filteredDisparity, filteredDisparityInLeftCamCoordSystem);
+    cv::flip(filteredDisparityInLeftCamCoordSystem, filteredDisparityInLeftCamCoordSystem, 0);
+
+    // The HoloLens 2's RGB camera has a focal length of 4.87 mm +/- 5%. However, there is no data about the focal
+    // length of the greyscale cameras. For now, I'm incorrectly assuming the greyscale cameras to have the same focal
+    // length. The greyscale cameras need to be calibrated at some point in the future and then this value needs to be
+    // changed accordingly.
+    float focalLength = 4.87 * 100.0; // I don't quite understand why this value has to be scaled up so much...
+    float minDisparityForReconstruction = 10.0;
+
+    // Create a point cloud from the filtered disparity map.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    for (uint32_t i = 0; i < stereoPixelDirections->pixelDirectionsLeft.size(); ++i)
+    {
+        const hololens_msgs::PixelDirection& dir = stereoPixelDirections->pixelDirectionsLeft[i];
+        // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the
+        // decimal dot and 1 channel per pixel. If some other disparity map estimation algorithm is used, the disparity
+        // map may have some other data type, so this may also need to be changed in case OpenCV's StereoSGBM algorithm
+        // is replaced with some other algorithm.
+        // Yes, u and v really need to be flipped to be in the order v, u instead of the normally expected order u, v.
+        float disparity = filteredDisparityInLeftCamCoordSystem.at<short>(dir.v, dir.u) / 16.0;
+        if (disparity > minDisparityForReconstruction)
+        {
+            // Disparity d is equal to B * f / Z where B is the baseline distance between the two cameras, f is the
+            // focal length and Z is the corresponding depth. Solving for Z, this equation becomes Z = B * f / d.
+            float depth = baselineDistance * focalLength / disparity;
+
+            pcl::PointXYZI point;
+            point.x = dir.direction.x * depth;
+            point.y = dir.direction.y * depth;
+            point.z = dir.direction.z * depth;
+            // TODO: These three lines are just here for debugging purposes. They need to be removed later on.
+            // point.x = dir.u * 0.01;
+            // point.y = dir.v * 0.01;
+            // point.z = depth;
+            point.intensity = static_cast<float>(imageLeft.valueAt(dir.u, dir.v)) / 255.0;
+            pointCloudCamSpace->push_back(point);
+        }
+    }
+
+    // Publish the point cloud.
+    sensor_msgs::PointCloud2 pointCloudMessage;
+    pcl::toROSMsg(*pointCloudCamSpace, pointCloudMessage);
+    pointCloudMessage.header.seq = sequenceNumber;
+    pointCloudMessage.header.stamp = time;
+    pointCloudMessage.header.frame_id = "hololens_stereo_cam_left";
+    pointCloudPublisher.publish(pointCloudMessage);
 
     // Publish the disparity map.
     cv::Mat disparityVisualization;
@@ -116,14 +201,6 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     disparityMsg.encoding = sensor_msgs::image_encodings::TYPE_8UC1;
     disparityMsg.image = disparityVisualization;
     disparityMapPublisher.publish(disparityMsg);
-
-    // Determine the HoloLens's position within its world coordinate system.
-    const hololens_msgs::Point& translationLeft = msg->camToWorldTranslationLeft;
-    const hololens_msgs::Point& translationRight = msg->camToWorldTranslationRight;
-    hololens_msgs::Point translationCenter;
-    translationCenter.x = (translationLeft.x + translationRight.x) / 2.0;
-    translationCenter.y = (translationLeft.y + translationRight.y) / 2.0;
-    translationCenter.z = (translationLeft.z + translationRight.z) / 2.0;
 
     // Publish the images and the HoloLens's current position.
     publishHololensPosition(translationLeft, stereoCamLeftPositionPublisher, sequenceNumber, time);

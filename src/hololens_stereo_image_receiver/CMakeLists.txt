@@ -13,6 +13,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf
   cv_bridge
+  pcl_conversions
+  pcl_ros
 )
 find_package(OpenCV)
 
