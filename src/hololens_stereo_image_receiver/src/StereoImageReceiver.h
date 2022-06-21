@@ -20,11 +20,12 @@
 #include <tf/transform_broadcaster.h>
 
 #include <cv_bridge/cv_bridge.h>
-#include "opencv2/calib3d.hpp"
-#include "opencv2/imgproc.hpp"
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/highgui.hpp"
+#include "opencv2/core/core.hpp"
 #include "opencv2/core/utility.hpp"
+#include "opencv2/calib3d.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/imgproc.hpp"
 #include "opencv2/ximgproc.hpp"
 
 #include <pcl/point_cloud.h>
@@ -47,6 +48,11 @@ private:
         const std::string frameId,
         uint32_t sequenceNumber,
         const ros::Time& timestamp);
+    cv_bridge::CvImage imageToMsg(
+        const cv::Mat& image,
+        const std::string frameId,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp);
     void publishImage(
         const Image image,
         const ros::Publisher& publisher,
@@ -64,6 +70,13 @@ private:
         const std::string frameId,
         tf::TransformBroadcaster& publisher,
         const ros::Time& timestamp);
+
+    // Sensor intrinsics of the stereo cameras.
+    cv::Mat RLeft, RRight, PLeft, PRight, Q, KLeft, KRight, R, DLeft, DRight;
+    cv::Vec3d T;
+    cv::Mat map1Left, map1Right, map2Left, map2Right;
+    bool undistortRectifyMapInitialized;
+    double focalLengthLeftCamera;
 
     // Parameters for OpenCV's StereoSGBM algorithm.
     int sgbmMinDisparity;
@@ -88,6 +101,9 @@ private:
     // Parameters for the disparity map visualization.
     double dispVisMultiplier;
     bool dispVisVisualizeRawDisparityMap;
+
+    // Parameters for reconstruction of a point cloud from the disparity map.
+    float minDisparityForReconstruction;
 
     // The directions (in camera space) in which each pixel of the stereo frames points at.
     hololens_msgs::StereoPixelDirections::Ptr stereoPixelDirections;

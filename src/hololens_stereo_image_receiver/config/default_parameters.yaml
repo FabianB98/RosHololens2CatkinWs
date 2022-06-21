@@ -2,6 +2,10 @@
 #    Default configuration file for the stereo image receiver.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# Camera intrinsics of the stereo cameras.
+stereoCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/stereo_cam_calibration.yml
+focalLengthLeftCamera: 3.5560949396111386e+02
+
 # Parameters for OpenCV's StereoSGBM algorithm.
 sgbmMinDisparity: 0
 sgbmNumDisparities: 96
@@ -22,3 +26,6 @@ wlsSigma: 1.2
 # Parameters for the disparity map visualization.
 dispVisMultiplier: 2.0
 dispVisVisualizeRawDisparityMap: false
+
+# Parameters for point cloud reconstruction.
+minDisparityForReconstruction: 10.0

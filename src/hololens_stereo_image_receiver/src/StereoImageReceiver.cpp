@@ -11,6 +11,24 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
 {
     ROS_INFO("Creating StereoImageReceiver...");
 
+    // Initialize all sensor intrinsics of the stereo camera as defined by configuration (or default values).
+    std::string stereoCamCalibrationFilePath;
+    n.param("stereoCamCalibrationFilePath", stereoCamCalibrationFilePath, std::string(""));
+    cv::FileStorage fs1(stereoCamCalibrationFilePath, cv::FileStorage::READ);
+    fs1["K1"] >> KLeft;
+    fs1["K2"] >> KRight;
+    fs1["D1"] >> DLeft;
+    fs1["D2"] >> DRight;
+    fs1["R"] >> R;
+    fs1["T"] >> T;
+    fs1["R1"] >> RLeft;
+    fs1["R2"] >> RRight;
+    fs1["P1"] >> PLeft;
+    fs1["P2"] >> PRight;
+    fs1["Q"] >> Q;
+    undistortRectifyMapInitialized = false;
+    n.param("focalLengthLeftCamera", focalLengthLeftCamera, 300.0);
+
     // Initialize all parameters for OpenCV's StereoSGBM algorithm as defined by configuration (or default values).
     n.param("sgbmMinDisparity", sgbmMinDisparity, 0);
     n.param("sgbmNumDisparities", sgbmNumDisparities, 64);
@@ -43,6 +61,9 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     n.param("dispVisMultiplier", dispVisMultiplier, 2.0);
     n.param("dispVisVisualizeRawDisparityMap", dispVisVisualizeRawDisparityMap, false);
 
+    // Initialize all parameters for the point cloud reconstruction as defined by configuration (or default values).
+    n.param("minDisparityForReconstruction", minDisparityForReconstruction, 10.0f);
+
     stereoImageLeftPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_LEFT_TOPIC, 10);
     stereoImageRightPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_RIGHT_TOPIC, 10);
     disparityMapPublisher = n.advertise<sensor_msgs::Image>(DISPARITY_MAP_TOPIC, 10);
@@ -66,12 +87,32 @@ void StereoImageReceiver::handleStereoPixelDirections(const hololens_msgs::Stere
     for (uint32_t i = 0; i < msg->pixelDirectionsLeft.size(); ++i)
     {
         hololens_msgs::PixelDirection dir = msg->pixelDirectionsLeft[i];
-        pixelDirections->pixelDirectionsLeft.push_back(dir);
+        // The streamed pixel directions are normalized to a length of 1.0, but it appears as if we need direction
+        // vectors with z = 1.0 for reconstruction of a point cloud from the disparity map.
+        hololens_msgs::Point directionVector;
+        directionVector.x = dir.direction.x / dir.direction.z;
+        directionVector.y = dir.direction.y / dir.direction.z;
+        directionVector.z = 1.0;
+        hololens_msgs::PixelDirection scaledDirection;
+        scaledDirection.u = dir.u;
+        scaledDirection.v = dir.v;
+        scaledDirection.direction = directionVector;
+        pixelDirections->pixelDirectionsLeft.push_back(scaledDirection);
     }
     for (uint32_t i = 0; i < msg->pixelDirectionsRight.size(); ++i)
     {
         hololens_msgs::PixelDirection dir = msg->pixelDirectionsRight[i];
-        pixelDirections->pixelDirectionsRight.push_back(dir);
+        // The streamed pixel directions are normalized to a length of 1.0, but it appears as if we need direction
+        // vectors with z = 1.0 for reconstruction of a point cloud from the disparity map.
+        hololens_msgs::Point directionVector;
+        directionVector.x = dir.direction.x / dir.direction.z;
+        directionVector.y = dir.direction.y / dir.direction.z;
+        directionVector.z = 1.0;
+        hololens_msgs::PixelDirection scaledDirection;
+        scaledDirection.u = dir.u;
+        scaledDirection.v = dir.v;
+        scaledDirection.direction = directionVector;
+        pixelDirections->pixelDirectionsRight.push_back(scaledDirection);
     }
     stereoPixelDirections = pixelDirections;
 }
@@ -126,31 +167,33 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         cv::imwrite(rightPath.c_str(), imageRightOpenCVUpright);
     }
 
-    // TODO: Check whether the images are already rectified by the HoloLens or whether this needs to be done here.
+    // Rectify the images.
+    if (!undistortRectifyMapInitialized)
+    {
+        cv::initUndistortRectifyMap(KLeft, DLeft, RLeft, PLeft, imageLeftOpenCVUpright.size(), CV_32F, map1Left, map2Left);
+        cv::initUndistortRectifyMap(KRight, DRight, RRight, PRight, imageRightOpenCVUpright.size(), CV_32F, map1Right, map2Right);
+        undistortRectifyMapInitialized = true;
+    }
+    cv::Mat leftRectified, rightRectified;
+    cv::remap(imageLeftOpenCVUpright, leftRectified, map1Left, map2Left, cv::INTER_LINEAR);
+    cv::remap(imageRightOpenCVUpright, rightRectified, map1Right, map2Right, cv::INTER_LINEAR);
 
     // Perform stereo matching using semi-global matching (SGM). Somewhat copied (and modified) from copied from
     // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat leftDisparity, rightDisparity;
-    leftMatcher->compute(imageLeftOpenCVUpright, imageRightOpenCVUpright, leftDisparity);
-    rightMatcher->compute(imageRightOpenCVUpright, imageLeftOpenCVUpright, rightDisparity);
+    leftMatcher->compute(leftRectified, rightRectified, leftDisparity);
+    rightMatcher->compute(rightRectified, leftRectified, rightDisparity);
 
     // Perform filtering. Somewhat copied (and modified) from copied from
     // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat filteredDisparity;
-    wlsFilter->filter(leftDisparity, imageLeftOpenCVUpright, filteredDisparity, rightDisparity);
+    wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity);
 
     // Rotate the filtered disparity map by 90 degrees counterclockwise such that it matches with the raw image data
     // obtained by the left camera. This is done to allow for an easier access to the received pixel directions.
     cv::Mat filteredDisparityInLeftCamCoordSystem;
     cv::transpose(filteredDisparity, filteredDisparityInLeftCamCoordSystem);
     cv::flip(filteredDisparityInLeftCamCoordSystem, filteredDisparityInLeftCamCoordSystem, 0);
-
-    // The HoloLens 2's RGB camera has a focal length of 4.87 mm +/- 5%. However, there is no data about the focal
-    // length of the greyscale cameras. For now, I'm incorrectly assuming the greyscale cameras to have the same focal
-    // length. The greyscale cameras need to be calibrated at some point in the future and then this value needs to be
-    // changed accordingly.
-    float focalLength = 4.87 * 100.0; // I don't quite understand why this value has to be scaled up so much...
-    float minDisparityForReconstruction = 10.0;
 
     // Create a point cloud from the filtered disparity map.
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
@@ -167,16 +210,13 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         {
             // Disparity d is equal to B * f / Z where B is the baseline distance between the two cameras, f is the
             // focal length and Z is the corresponding depth. Solving for Z, this equation becomes Z = B * f / d.
-            float depth = baselineDistance * focalLength / disparity;
+            float depth = baselineDistance * focalLengthLeftCamera / disparity;
 
             pcl::PointXYZI point;
             point.x = dir.direction.x * depth;
             point.y = dir.direction.y * depth;
             point.z = dir.direction.z * depth;
-            // TODO: These three lines are just here for debugging purposes. They need to be removed later on.
-            // point.x = dir.u * 0.01;
-            // point.y = dir.v * 0.01;
-            // point.z = depth;
+            // TODO: This is incorrect and needs to be fixed. The image was rectified, so the pixels of the original image will no longer correspond directly to the pixels of the disparity map.
             point.intensity = static_cast<float>(imageLeft.valueAt(dir.u, dir.v)) / 255.0;
             pointCloudCamSpace->push_back(point);
         }
@@ -208,8 +248,8 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     publishHololensPosition(translationCenter, hololensPositionPublisher, sequenceNumber, time);
     publishHololensCamToWorldTf(translationLeft, msg->camToWorldRotationLeft, "hololens_stereo_cam_left", hololensCamLeftPublisher, time);
     publishHololensCamToWorldTf(translationRight, msg->camToWorldRotationRight, "hololens_stereo_cam_right", hololensCamRightPublisher, time);
-    stereoImageLeftPublisher.publish(imageMsgLeft);
-    stereoImageRightPublisher.publish(imageMsgRight);
+    stereoImageLeftPublisher.publish(imageToMsg(leftRectified, "hololens_stereo_cam_left", sequenceNumber, time));
+    stereoImageRightPublisher.publish(imageToMsg(rightRectified, "hololens_stereo_cam_right", sequenceNumber, time));
     sequenceNumber++;
 }
 
@@ -245,6 +285,24 @@ sensor_msgs::Image StereoImageReceiver::imageToMsg(
             imageMsg.data.push_back(pixelValue);
         }
     }
+
+    return imageMsg;
+}
+
+cv_bridge::CvImage StereoImageReceiver::imageToMsg(
+    const cv::Mat& image,
+    const std::string frameId,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp)
+{
+    cv_bridge::CvImage imageMsg;
+
+    imageMsg.header.seq = sequenceNumber;
+    imageMsg.header.stamp = timestamp;
+    imageMsg.header.frame_id = frameId;
+
+    imageMsg.encoding = sensor_msgs::image_encodings::TYPE_8UC1;
+    imageMsg.image = image;
 
     return imageMsg;
 }
