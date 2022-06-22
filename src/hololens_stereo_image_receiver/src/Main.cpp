@@ -8,7 +8,6 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
 
     ros::Subscriber stereoImageSubscriber = n.subscribe(STEREO_IMAGE_TOPIC, 10, stereoImageCallback);
-    ros::Subscriber stereoPixelDirectionsSubscriber = n.subscribe(STEREO_PIXEL_DIRECTIONS_TOPIC, 10, stereoPixelDirectionsCallback);
 
     stereoImageReceiver = new StereoImageReceiver(n);
 
@@ -25,9 +24,4 @@ int main(int argc, char **argv)
 void stereoImageCallback(const hololens_msgs::StereoCameraFrame::ConstPtr& msg)
 {
     stereoImageReceiver->handleStereoCameraFrame(msg);
-}
-
-void stereoPixelDirectionsCallback(const hololens_msgs::StereoPixelDirections::ConstPtr& msg)
-{
-    stereoImageReceiver->handleStereoPixelDirections(msg);
 }

@@ -27,7 +27,6 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     fs1["P2"] >> PRight;
     fs1["Q"] >> Q;
     undistortRectifyMapInitialized = false;
-    n.param("focalLengthLeftCamera", focalLengthLeftCamera, 300.0);
 
     // Initialize all parameters for OpenCV's StereoSGBM algorithm as defined by configuration (or default values).
     n.param("sgbmMinDisparity", sgbmMinDisparity, 0);
@@ -72,49 +71,7 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(HOLOLENS_POSITION_TOPIC, 10);
     pointCloudPublisher = n.advertise<sensor_msgs::PointCloud2>(POINT_CLOUD_TOPIC, 10);
 
-    stereoPixelDirections = hololens_msgs::StereoPixelDirections::Ptr(new hololens_msgs::StereoPixelDirections());
     sequenceNumber = 0;
-}
-
-void StereoImageReceiver::handleStereoPixelDirections(const hololens_msgs::StereoPixelDirections::ConstPtr& msg)
-{
-    ROS_INFO("Received %zu and %zu pixel directions for the left and right camera respectively.", 
-            msg->pixelDirectionsLeft.size(), msg->pixelDirectionsRight.size());
-
-    // The pixel directions are not used yet when a stereo camera frame is received, but we'll already store a copy of
-    // them in case we need them later on.
-    hololens_msgs::StereoPixelDirections::Ptr pixelDirections = hololens_msgs::StereoPixelDirections::Ptr(new hololens_msgs::StereoPixelDirections());
-    for (uint32_t i = 0; i < msg->pixelDirectionsLeft.size(); ++i)
-    {
-        hololens_msgs::PixelDirection dir = msg->pixelDirectionsLeft[i];
-        // The streamed pixel directions are normalized to a length of 1.0, but it appears as if we need direction
-        // vectors with z = 1.0 for reconstruction of a point cloud from the disparity map.
-        hololens_msgs::Point directionVector;
-        directionVector.x = dir.direction.x / dir.direction.z;
-        directionVector.y = dir.direction.y / dir.direction.z;
-        directionVector.z = 1.0;
-        hololens_msgs::PixelDirection scaledDirection;
-        scaledDirection.u = dir.u;
-        scaledDirection.v = dir.v;
-        scaledDirection.direction = directionVector;
-        pixelDirections->pixelDirectionsLeft.push_back(scaledDirection);
-    }
-    for (uint32_t i = 0; i < msg->pixelDirectionsRight.size(); ++i)
-    {
-        hololens_msgs::PixelDirection dir = msg->pixelDirectionsRight[i];
-        // The streamed pixel directions are normalized to a length of 1.0, but it appears as if we need direction
-        // vectors with z = 1.0 for reconstruction of a point cloud from the disparity map.
-        hololens_msgs::Point directionVector;
-        directionVector.x = dir.direction.x / dir.direction.z;
-        directionVector.y = dir.direction.y / dir.direction.z;
-        directionVector.z = 1.0;
-        hololens_msgs::PixelDirection scaledDirection;
-        scaledDirection.u = dir.u;
-        scaledDirection.v = dir.v;
-        scaledDirection.direction = directionVector;
-        pixelDirections->pixelDirectionsRight.push_back(scaledDirection);
-    }
-    stereoPixelDirections = pixelDirections;
 }
 
 void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCameraFrame::ConstPtr& msg)
@@ -189,35 +146,38 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     cv::Mat filteredDisparity;
     wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity);
 
-    // Rotate the filtered disparity map by 90 degrees counterclockwise such that it matches with the raw image data
-    // obtained by the left camera. This is done to allow for an easier access to the received pixel directions.
-    cv::Mat filteredDisparityInLeftCamCoordSystem;
-    cv::transpose(filteredDisparity, filteredDisparityInLeftCamCoordSystem);
-    cv::flip(filteredDisparityInLeftCamCoordSystem, filteredDisparityInLeftCamCoordSystem, 0);
-
     // Create a point cloud from the filtered disparity map.
+    // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the decimal
+    // dot and 1 channel per pixel. According to the documentation of reprojectImageTo3D these values should therefore
+    // be divided by 16 and scaled to float. If some other disparity map estimation algorithm is used, the disparity map
+    // may have some other data type, so this may not be needed in case OpenCV's StereoSGBM algorithm is replaced with
+    // some other algorithm.
+    cv::Mat filteredDisparityAsFloats;
+    filteredDisparity.convertTo(filteredDisparityAsFloats, CV_32F, 1.0/16.0);
+    cv::Mat points;
+    cv::reprojectImageTo3D(filteredDisparityAsFloats, points, Q);
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
-    for (uint32_t i = 0; i < stereoPixelDirections->pixelDirectionsLeft.size(); ++i)
+    for (uint32_t v = 0; v < points.size().height; v++)
     {
-        const hololens_msgs::PixelDirection& dir = stereoPixelDirections->pixelDirectionsLeft[i];
-        // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the
-        // decimal dot and 1 channel per pixel. If some other disparity map estimation algorithm is used, the disparity
-        // map may have some other data type, so this may also need to be changed in case OpenCV's StereoSGBM algorithm
-        // is replaced with some other algorithm.
-        // Yes, u and v really need to be flipped to be in the order v, u instead of the normally expected order u, v.
-        float disparity = filteredDisparityInLeftCamCoordSystem.at<short>(dir.v, dir.u) / 16.0;
-        if (disparity > minDisparityForReconstruction)
-        {
-            // Disparity d is equal to B * f / Z where B is the baseline distance between the two cameras, f is the
-            // focal length and Z is the corresponding depth. Solving for Z, this equation becomes Z = B * f / d.
-            float depth = baselineDistance * focalLengthLeftCamera / disparity;
+        float* disparityRow = filteredDisparityAsFloats.ptr<float>(v);
+        cv::Vec3f* pointsRow = points.ptr<cv::Vec3f>(v);
+        uchar* grayscaleRow = leftRectified.ptr<uchar>(v);
 
+        for (uint32_t u = 0; u < points.size().width; u++)
+        {
+            // Ensure that the current pixel was actually mapped to some valid point in 3D space.
+            const float disparity = disparityRow[u];
+            if (disparity <= minDisparityForReconstruction)
+                continue;
+
+            // Rotate each point by 90 degrees counterclockwise around the z-axis. This is needed to undo the rotation
+            // performed on the left image. If we didn't rotate the points, the resulting point cloud would be rotated
+            // by 90 degrees clockwise around the camera's z-axis instead of being upright.
             pcl::PointXYZI point;
-            point.x = dir.direction.x * depth;
-            point.y = dir.direction.y * depth;
-            point.z = dir.direction.z * depth;
-            // TODO: This is incorrect and needs to be fixed. The image was rectified, so the pixels of the original image will no longer correspond directly to the pixels of the disparity map.
-            point.intensity = static_cast<float>(imageLeft.valueAt(dir.u, dir.v)) / 255.0;
+            point.x = pointsRow[u][1];
+            point.y = -pointsRow[u][0];
+            point.z = pointsRow[u][2];
+            point.intensity = static_cast<float>(grayscaleRow[u]) / 255.0;
             pointCloudCamSpace->push_back(point);
         }
     }

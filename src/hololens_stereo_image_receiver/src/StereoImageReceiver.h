@@ -37,9 +37,8 @@ class StereoImageReceiver
 public:
     StereoImageReceiver(ros::NodeHandle n);
 
-    // Callbacks for handling the incoming stereo camera frames and pixel directions.
+    // Callback for handling the incoming stereo camera frames.
     void handleStereoCameraFrame(const hololens_msgs::StereoCameraFrame::ConstPtr& msg);
-    void handleStereoPixelDirections(const hololens_msgs::StereoPixelDirections::ConstPtr& msg);
 
 private:
     // Methods for publishing the results.
@@ -76,7 +75,6 @@ private:
     cv::Vec3d T;
     cv::Mat map1Left, map1Right, map2Left, map2Right;
     bool undistortRectifyMapInitialized;
-    double focalLengthLeftCamera;
 
     // Parameters for OpenCV's StereoSGBM algorithm.
     int sgbmMinDisparity;
@@ -104,9 +102,6 @@ private:
 
     // Parameters for reconstruction of a point cloud from the disparity map.
     float minDisparityForReconstruction;
-
-    // The directions (in camera space) in which each pixel of the stereo frames points at.
-    hololens_msgs::StereoPixelDirections::Ptr stereoPixelDirections;
 
     // ROS publishers.
     ros::Publisher stereoImageLeftPublisher;
