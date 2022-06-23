@@ -7,14 +7,14 @@ stereoCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/ster
 
 # Parameters for OpenCV's StereoSGBM algorithm.
 sgbmMinDisparity: 0
-sgbmNumDisparities: 96
-sgbmBlockSize: 9
+sgbmNumDisparities: 128
+sgbmBlockSize: 3
 sgbmP1Multiplier: 8
 sgbmP2Multiplier: 32
 sgbmDisp12MaxDiff: 50
-sgbmPreFilterCap: 0
-sgbmUniquenessRatio: 15
-sgbmSpeckleWindowSize: 100
+sgbmPreFilterCap: 5
+sgbmUniquenessRatio: 50
+sgbmSpeckleWindowSize: 200
 sgbmSpeckleRange: 2
 sgbmUseModeHH: true
 

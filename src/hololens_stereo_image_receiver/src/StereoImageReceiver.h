@@ -104,8 +104,11 @@ private:
     float minDisparityForReconstruction;
 
     // ROS publishers.
+    ros::Publisher stereoImageLeftRawPublisher;
+    ros::Publisher stereoImageRightRawPublisher;
     ros::Publisher stereoImageLeftPublisher;
     ros::Publisher stereoImageRightPublisher;
+    ros::Publisher disparityMapRawPublisher;
     ros::Publisher disparityMapPublisher;
     ros::Publisher stereoCamLeftPositionPublisher;
     ros::Publisher stereoCamRightPositionPublisher;
