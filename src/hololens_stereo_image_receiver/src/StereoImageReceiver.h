@@ -58,6 +58,11 @@ private:
         const std::string frameId,
         uint32_t sequenceNumber,
         const ros::Time& timestamp);
+    void publishDisparityMap(
+        const cv::Mat& disparityMap,
+        const ros::Publisher& publisher,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp);
     void publishHololensPosition(
         const hololens_msgs::Point& position,
         const ros::Publisher& publisher,
@@ -75,6 +80,10 @@ private:
     cv::Vec3d T;
     cv::Mat map1Left, map1Right, map2Left, map2Right;
     bool undistortRectifyMapInitialized;
+
+    // Parameters for preprocessing the raw stereo images.
+    bool preprocessingDoImageNormalization;
+    bool preprocessingDoHistogramEqualization;
 
     // Parameters for OpenCV's StereoSGBM algorithm.
     int sgbmMinDisparity;
@@ -98,9 +107,9 @@ private:
 
     // Parameters for the disparity map visualization.
     double dispVisMultiplier;
-    bool dispVisVisualizeRawDisparityMap;
 
     // Parameters for reconstruction of a point cloud from the disparity map.
+    bool reconstructPointCloudFromRawDisparityMap;
     float minDisparityForReconstruction;
 
     // ROS publishers.

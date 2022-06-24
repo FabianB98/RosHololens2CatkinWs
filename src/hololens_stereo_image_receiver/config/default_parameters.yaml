@@ -5,6 +5,10 @@
 # Camera intrinsics of the stereo cameras.
 stereoCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/stereo_cam_calibration.yml
 
+# Parameters for preprocessing the raw stereo images.
+preprocessingDoImageNormalization: false
+preprocessingDoHistogramEqualization: false
+
 # Parameters for OpenCV's StereoSGBM algorithm.
 sgbmMinDisparity: 0
 sgbmNumDisparities: 128
@@ -24,7 +28,7 @@ wlsSigma: 1.2
 
 # Parameters for the disparity map visualization.
 dispVisMultiplier: 2.0
-dispVisVisualizeRawDisparityMap: false
 
 # Parameters for point cloud reconstruction.
+reconstructPointCloudFromRawDisparityMap: false
 minDisparityForReconstruction: 5.0
