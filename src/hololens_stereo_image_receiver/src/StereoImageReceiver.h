@@ -90,6 +90,8 @@ private:
     // Parameters for preprocessing the raw stereo images.
     bool preprocessingDoImageNormalization;
     bool preprocessingDoHistogramEqualization;
+    bool preprocessingDoMedianFiltering;
+    int preprocessingMedianFilterKernelSize;
 
     // Parameters for OpenCV's StereoSGBM algorithm.
     int sgbmMinDisparity;

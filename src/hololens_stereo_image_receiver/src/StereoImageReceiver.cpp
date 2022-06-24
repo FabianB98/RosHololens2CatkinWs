@@ -31,6 +31,8 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     // Initialize all parameters for preprocessing as defined by configuration (or default values).
     n.param("preprocessingDoImageNormalization", preprocessingDoImageNormalization, false);
     n.param("preprocessingDoHistogramEqualization", preprocessingDoHistogramEqualization, false);
+    n.param("preprocessingDoMedianFiltering", preprocessingDoMedianFiltering, false);
+    n.param("preprocessingMedianFilterKernelSize", preprocessingMedianFilterKernelSize, 3);
 
     // Initialize all parameters for OpenCV's StereoSGBM algorithm as defined by configuration (or default values).
     n.param("sgbmMinDisparity", sgbmMinDisparity, 0);
@@ -96,6 +98,8 @@ void StereoImageReceiver::handleReconfiguration(
 
         preprocessingDoImageNormalization = config.preprocessingDoImageNormalization;
         preprocessingDoHistogramEqualization = config.preprocessingDoHistogramEqualization;
+        preprocessingDoMedianFiltering = config.preprocessingDoMedianFiltering;
+        preprocessingMedianFilterKernelSize = config.preprocessingMedianFilterKernelSize;
     }
 
     if (level & 2)
@@ -217,6 +221,11 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         cv::equalizeHist(imageLeftOpenCVUpright, imageLeftOpenCVUpright);
         cv::equalizeHist(imageRightOpenCVUpright, imageRightOpenCVUpright);
     }
+    if (preprocessingDoMedianFiltering)
+    {
+        cv::medianBlur(imageLeftOpenCVUpright, imageLeftOpenCVUpright, preprocessingMedianFilterKernelSize);
+        cv::medianBlur(imageRightOpenCVUpright, imageRightOpenCVUpright, preprocessingMedianFilterKernelSize);
+    }
 
     // Rectify the images.
     if (!undistortRectifyMapInitialized)
@@ -279,6 +288,8 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
             pointCloudCamSpace->push_back(point);
         }
     }
+
+    // TODO: Point cloud downsampling and outlier removal.
 
     // Publish the point cloud.
     sensor_msgs::PointCloud2 pointCloudMessage;

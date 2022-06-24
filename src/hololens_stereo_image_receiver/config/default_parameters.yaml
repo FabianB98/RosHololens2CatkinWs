@@ -8,6 +8,8 @@ stereoCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/ster
 # Parameters for preprocessing the raw stereo images.
 preprocessingDoImageNormalization: false
 preprocessingDoHistogramEqualization: false
+preprocessingDoMedianFiltering: false
+preprocessingMedianFilterKernelSize: 3
 
 # Parameters for OpenCV's StereoSGBM algorithm.
 sgbmMinDisparity: 0
