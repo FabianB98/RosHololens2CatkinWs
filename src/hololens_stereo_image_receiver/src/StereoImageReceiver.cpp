@@ -81,8 +81,87 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     sequenceNumber = 0;
 }
 
+void StereoImageReceiver::handleReconfiguration(
+    hololens_stereo_image_receiver::StereoImageReceiverConfig& config,
+    uint32_t level)
+{
+    ROS_INFO("Reconfiguring with level %u...", level);
+
+    if (level >= 16)
+        return;
+    
+    if (level & 1)
+    {
+        ROS_INFO("Preprocessing parameters were changed.");
+
+        preprocessingDoImageNormalization = config.preprocessingDoImageNormalization;
+        preprocessingDoHistogramEqualization = config.preprocessingDoHistogramEqualization;
+    }
+
+    if (level & 2)
+    {
+        ROS_INFO("SGBM parameters were changed.");
+
+        sgbmMinDisparity = config.sgbmMinDisparity;
+        sgbmNumDisparities = config.sgbmNumDisparities;
+        if (sgbmNumDisparities % 16 != 0)
+            sgbmNumDisparities += 16 - (sgbmNumDisparities % 16);
+        sgbmBlockSize = config.sgbmBlockSize;
+        sgbmP1Multiplier = config.sgbmP1Multiplier;
+        sgbmP2Multiplier = config.sgbmP2Multiplier;
+        sgbmDisp12MaxDiff = config.sgbmDisp12MaxDiff;
+        sgbmPreFilterCap = config.sgbmPreFilterCap;
+        sgbmUniquenessRatio = config.sgbmUniquenessRatio;
+        sgbmSpeckleWindowSize = config.sgbmSpeckleWindowSize;
+        sgbmSpeckleRange = config.sgbmSpeckleRange;
+        sgbmUseModeHH = config.sgbmUseModeHH;
+
+        updateMatchers = true;
+        updateWlsFilter = true;
+    }
+
+    if (level & 4)
+    {
+        ROS_INFO("WLS parameters were changed.");
+
+        wlsLambda = config.wlsLambda;
+        wlsSigma = config.wlsSigma;
+
+        updateWlsFilter = true;
+    }
+
+    if (level & 8)
+    {
+        ROS_INFO("Point cloud reconstruction parameters were changed.");
+
+        reconstructPointCloudFromRawDisparityMap = config.reconstructPointCloudFromRawDisparityMap;
+        minDisparityForReconstruction = config.minDisparityForReconstruction;
+    }
+}
+
 void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCameraFrame::ConstPtr& msg)
 {
+    if (updateMatchers)
+    {
+        updateMatchers = false;
+
+        int sgbmBlockSizeSquared = sgbmBlockSize * sgbmBlockSize;
+        leftMatcher = cv::StereoSGBM::create(sgbmMinDisparity, sgbmNumDisparities, sgbmBlockSize,
+            sgbmP1Multiplier * sgbmBlockSizeSquared, sgbmP2Multiplier * sgbmBlockSizeSquared, sgbmDisp12MaxDiff,
+            sgbmPreFilterCap, sgbmUniquenessRatio, sgbmSpeckleWindowSize, sgbmSpeckleRange,
+            sgbmUseModeHH ? cv::StereoSGBM::MODE_HH : cv::StereoSGBM::MODE_SGBM);
+        rightMatcher = cv::ximgproc::createRightMatcher(leftMatcher);
+    }
+
+    if (updateWlsFilter)
+    {
+        updateWlsFilter = false;
+
+        wlsFilter = cv::ximgproc::createDisparityWLSFilter(leftMatcher);
+        wlsFilter->setLambda(wlsLambda);
+        wlsFilter->setSigmaColor(wlsSigma);
+    }
+
     // Decode the two images.
     std::string decodedLeft = base64_decode(msg->base64encodedImageLeft);
     std::string decodedRight = base64_decode(msg->base64encodedImageRight);
@@ -142,7 +221,8 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     // Rectify the images.
     if (!undistortRectifyMapInitialized)
     {
-        cv::stereoRectify(KLeft, DLeft, KRight, DRight, imageLeftOpenCVUpright.size(), R, T, RLeft, RRight, PLeft, PRight, Q, cv::CALIB_ZERO_DISPARITY, 0.0);
+        cv::stereoRectify(KLeft, DLeft, KRight, DRight, imageLeftOpenCVUpright.size(), R, T, RLeft, RRight, PLeft, PRight, Q,
+                cv::CALIB_ZERO_DISPARITY, -1.0, cv::Size(), &validPixelsRectLeft, &validPixelsRectRight);
 
         cv::initUndistortRectifyMap(KLeft, DLeft, RLeft, PLeft, imageLeftOpenCVUpright.size(), CV_32F, map1Left, map2Left);
         cv::initUndistortRectifyMap(KRight, DRight, RRight, PRight, imageRightOpenCVUpright.size(), CV_32F, map1Right, map2Right);
@@ -161,7 +241,7 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     // Perform filtering. Somewhat copied (and modified) from copied from
     // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat filteredDisparity;
-    wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity);
+    wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity, validPixelsRectLeft);
 
     // Create a point cloud from the filtered disparity map.
     // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the decimal
@@ -175,13 +255,13 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     cv::Mat points;
     cv::reprojectImageTo3D(reconstructionDisparityAsFloats, points, Q);
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
-    for (uint32_t v = 0; v < points.size().height; v++)
+    for (uint32_t v = validPixelsRectLeft.y; v < validPixelsRectLeft.height; v++)
     {
         float* disparityRow = reconstructionDisparityAsFloats.ptr<float>(v);
         cv::Vec3f* pointsRow = points.ptr<cv::Vec3f>(v);
         uchar* grayscaleRow = leftRectified.ptr<uchar>(v);
 
-        for (uint32_t u = 0; u < points.size().width; u++)
+        for (uint32_t u = validPixelsRectLeft.x; u < validPixelsRectLeft.width; u++)
         {
             // Ensure that the current pixel was actually mapped to some valid point in 3D space.
             const float disparity = disparityRow[u];

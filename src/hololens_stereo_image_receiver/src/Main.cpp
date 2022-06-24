@@ -11,6 +11,11 @@ int main(int argc, char **argv)
 
     stereoImageReceiver = new StereoImageReceiver(n);
 
+    dynamic_reconfigure::Server<hololens_stereo_image_receiver::StereoImageReceiverConfig> server;
+    dynamic_reconfigure::Server<hololens_stereo_image_receiver::StereoImageReceiverConfig>::CallbackType f;
+    f = boost::bind(&StereoImageReceiver::handleReconfiguration, stereoImageReceiver, _1, _2);
+    server.setCallback(f);
+
     // Perform the update loop using a multi threaded spinner with an amount of threads equal to the core count of the CPU.
     ros::MultiThreadedSpinner spinner(0);
     spinner.spin();

@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   pcl_conversions
   pcl_ros
+  dynamic_reconfigure
 )
 find_package(OpenCV)
 
@@ -93,10 +94,9 @@ find_package(OpenCV)
 ##     and list every .cfg file to be processed
 
 ## Generate dynamic reconfigure parameters in the 'cfg' folder
-# generate_dynamic_reconfigure_options(
-#   cfg/DynReconf1.cfg
-#   cfg/DynReconf2.cfg
-# )
+generate_dynamic_reconfigure_options(
+  cfg/StereoImageReceiver.cfg
+)
 
 ###################################
 ## catkin specific configuration ##
@@ -125,6 +125,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
 )
+include_directories(${dynamic_reconfigure_PACKAGE_PATH}/cmake/cfgbuild.cmake)
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -157,6 +158,7 @@ include_directories(
 # )
 
 add_executable(stereo_image_receiver src/Main.cpp src/StereoImageReceiver.cpp src/Image.cpp src/Pixel.cpp src/Base64.cpp)
+add_dependencies(stereo_image_receiver ${PROJECT_NAME}_gencfg)
 target_link_libraries(stereo_image_receiver ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 #############

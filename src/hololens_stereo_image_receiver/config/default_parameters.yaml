@@ -11,20 +11,20 @@ preprocessingDoHistogramEqualization: false
 
 # Parameters for OpenCV's StereoSGBM algorithm.
 sgbmMinDisparity: 0
-sgbmNumDisparities: 128
-sgbmBlockSize: 3
+sgbmNumDisparities: 96
+sgbmBlockSize: 15
 sgbmP1Multiplier: 8
 sgbmP2Multiplier: 32
-sgbmDisp12MaxDiff: 50
-sgbmPreFilterCap: 5
-sgbmUniquenessRatio: 50
+sgbmDisp12MaxDiff: 100
+sgbmPreFilterCap: 0
+sgbmUniquenessRatio: 15
 sgbmSpeckleWindowSize: 200
 sgbmSpeckleRange: 2
 sgbmUseModeHH: true
 
 # Parameters for OpenCV's DisparityWLSFilter.
-wlsLambda: 8000.0
-wlsSigma: 1.2
+wlsLambda: 10000.0
+wlsSigma: 1.0
 
 # Parameters for the disparity map visualization.
 dispVisMultiplier: 2.0

@@ -32,13 +32,17 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <dynamic_reconfigure/server.h>
+#include <hololens_stereo_image_receiver/StereoImageReceiverConfig.h>
+
 class StereoImageReceiver
 {
 public:
     StereoImageReceiver(ros::NodeHandle n);
 
-    // Callback for handling the incoming stereo camera frames.
+    // Callback for handling the incoming stereo camera frames and dynamic reconfiguration.
     void handleStereoCameraFrame(const hololens_msgs::StereoCameraFrame::ConstPtr& msg);
+    void handleReconfiguration(hololens_stereo_image_receiver::StereoImageReceiverConfig& config, uint32_t level);
 
 private:
     // Methods for publishing the results.
@@ -80,6 +84,8 @@ private:
     cv::Vec3d T;
     cv::Mat map1Left, map1Right, map2Left, map2Right;
     bool undistortRectifyMapInitialized;
+    cv::Rect validPixelsRectLeft;
+    cv::Rect validPixelsRectRight;
 
     // Parameters for preprocessing the raw stereo images.
     bool preprocessingDoImageNormalization;
@@ -97,12 +103,14 @@ private:
     int sgbmSpeckleWindowSize;
     int sgbmSpeckleRange;
     bool sgbmUseModeHH;
+    bool updateMatchers = false;
     cv::Ptr<cv::StereoSGBM> leftMatcher;
     cv::Ptr<cv::StereoMatcher> rightMatcher;
 
     // Parameters for OpenCV's DisparityWLSFilter.
     double wlsLambda;
     double wlsSigma;
+    bool updateWlsFilter = false;
     cv::Ptr<cv::ximgproc::DisparityWLSFilter> wlsFilter;
 
     // Parameters for the disparity map visualization.
