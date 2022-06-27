@@ -22,7 +22,7 @@ sgbmPreFilterCap: 0
 sgbmUniquenessRatio: 15
 sgbmSpeckleWindowSize: 200
 sgbmSpeckleRange: 2
-sgbmUseModeHH: true
+sgbmMode: 1 # 0 = MODE_SGBM, 1 = MODE_HH, 2 = MODE_SGBM_3WAY, 3 = MODE_HH4
 
 # Parameters for OpenCV's DisparityWLSFilter.
 wlsLambda: 10000.0
@@ -34,3 +34,22 @@ dispVisMultiplier: 2.0
 # Parameters for point cloud reconstruction.
 reconstructPointCloudFromRawDisparityMap: false
 minDisparityForReconstruction: 5.0
+
+# Parameters for point cloud downsampling.
+doDownsampling: true
+downsamplingLeafSize: 0.01
+
+# Parameters for point cloud outlier removal using a radius outlier removal filter.
+doOutlierRemovalRadius: true
+outlierRemovalRadiusSearch: 0.05
+outlierRemovalMinNeighborsInRadius: 12
+
+# Parameters for point cloud outlier removal using a statistical outlier removal filter.
+doOutlierRemovalStatistical: false
+outlierRemovalNeighborsToCheck: 10
+outlierRemovalStdDeviationMultiplier: 0.5
+
+# Parameters for point cloud outlier removal using euclidean clustering.
+doOutlierRemovalClustering: false
+outlierRemovalClusterTolerance: 0.08
+outlierRemovalMinClusterSize: 500

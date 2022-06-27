@@ -10,6 +10,7 @@
 StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
 {
     ROS_INFO("Creating StereoImageReceiver...");
+    ROS_INFO("Using OpenCV version %s", CV_VERSION);
 
     // Initialize all sensor intrinsics of the stereo camera as defined by configuration (or default values).
     std::string stereoCamCalibrationFilePath;
@@ -48,11 +49,11 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     n.param("sgbmUniquenessRatio", sgbmUniquenessRatio, 10);
     n.param("sgbmSpeckleWindowSize", sgbmSpeckleWindowSize, 100);
     n.param("sgbmSpeckleRange", sgbmSpeckleRange, 1);
-    n.param("sgbmUseModeHH", sgbmUseModeHH, true);
+    n.param("sgbmMode", sgbmMode, 1);
     leftMatcher = cv::StereoSGBM::create(sgbmMinDisparity, sgbmNumDisparities, sgbmBlockSize,
             sgbmP1Multiplier * sgbmBlockSizeSquared, sgbmP2Multiplier * sgbmBlockSizeSquared, sgbmDisp12MaxDiff,
             sgbmPreFilterCap, sgbmUniquenessRatio, sgbmSpeckleWindowSize, sgbmSpeckleRange,
-            sgbmUseModeHH ? cv::StereoSGBM::MODE_HH : cv::StereoSGBM::MODE_SGBM);
+            sgbmMode == 0 ? cv::StereoSGBM::MODE_SGBM : sgbmMode == 1 ? cv::StereoSGBM::MODE_HH : sgbmMode == 2 ? cv::StereoSGBM::MODE_SGBM_3WAY : cv::StereoSGBM::MODE_HH4);
     rightMatcher = cv::ximgproc::createRightMatcher(leftMatcher);
 
     // Initialize all parameters for OpenCV's DisparityWLSFilter as defined by configuration (or default values).
@@ -68,6 +69,25 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     // Initialize all parameters for the point cloud reconstruction as defined by configuration (or default values).
     n.param("reconstructPointCloudFromRawDisparityMap", reconstructPointCloudFromRawDisparityMap, false);
     n.param("minDisparityForReconstruction", minDisparityForReconstruction, 10.0f);
+
+    // Initialize all parameters for point cloud downsampling as defined by configuration (or default values).
+    n.param("doDownsampling", doDownsampling, true);
+    n.param("downsamplingLeafSize", downsamplingLeafSize, 0.01f);
+
+    // Initialize all parameters for point cloud outlier removal using a radius outlier removal filter as defined by configuration (or default values).
+    n.param("doOutlierRemovalRadius", doOutlierRemovalRadius, true);
+    n.param("outlierRemovalRadiusSearch", outlierRemovalRadiusSearch, 0.05);
+    n.param("outlierRemovalMinNeighborsInRadius", outlierRemovalMinNeighborsInRadius, 12);
+
+    // Initialize all parameters for point cloud outlier removal using a statistical outlier removal filter as defined by configuration (or default values).
+    n.param("doOutlierRemovalStatistical", doOutlierRemovalStatistical, false);
+    n.param("outlierRemovalNeighborsToCheck", outlierRemovalNeighborsToCheck, 10);
+    n.param("outlierRemovalStdDeviationMultiplier", outlierRemovalStdDeviationMultiplier, 0.5);
+
+    // Initialize all parameters for point cloud outlier removal using euclidean clustering as defined by configuration (or default values).
+    n.param("doOutlierRemovalClustering", doOutlierRemovalClustering, false);
+    n.param("outlierRemovalClusterTolerance", outlierRemovalClusterTolerance, 0.08);
+    n.param("outlierRemovalMinClusterSize", outlierRemovalMinClusterSize, 500);
 
     stereoImageLeftRawPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_LEFT_RAW_TOPIC, 10);
     stereoImageRightRawPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_RIGHT_RAW_TOPIC, 10);
@@ -87,10 +107,10 @@ void StereoImageReceiver::handleReconfiguration(
     hololens_stereo_image_receiver::StereoImageReceiverConfig& config,
     uint32_t level)
 {
-    ROS_INFO("Reconfiguring with level %u...", level);
-
-    if (level >= 16)
+    if (level >= 256)
         return;
+
+    ROS_INFO("Reconfiguring with level %u...", level);
     
     if (level & 1)
     {
@@ -118,7 +138,7 @@ void StereoImageReceiver::handleReconfiguration(
         sgbmUniquenessRatio = config.sgbmUniquenessRatio;
         sgbmSpeckleWindowSize = config.sgbmSpeckleWindowSize;
         sgbmSpeckleRange = config.sgbmSpeckleRange;
-        sgbmUseModeHH = config.sgbmUseModeHH;
+        sgbmMode = config.sgbmMode;
 
         updateMatchers = true;
         updateWlsFilter = true;
@@ -141,6 +161,41 @@ void StereoImageReceiver::handleReconfiguration(
         reconstructPointCloudFromRawDisparityMap = config.reconstructPointCloudFromRawDisparityMap;
         minDisparityForReconstruction = config.minDisparityForReconstruction;
     }
+
+    if (level & 16)
+    {
+        ROS_INFO("Point cloud downsampling parameters were changed.");
+
+        doDownsampling = config.doDownsampling;
+        downsamplingLeafSize = config.downsamplingLeafSize;
+    }
+
+    if (level & 32)
+    {
+        ROS_INFO("Radius outlier removal filter parameters were changed.");
+
+        doOutlierRemovalRadius = config.doOutlierRemovalRadius;
+        outlierRemovalRadiusSearch = config.outlierRemovalRadiusSearch;
+        outlierRemovalMinNeighborsInRadius = config.outlierRemovalMinNeighborsInRadius;
+    }
+
+    if (level & 64)
+    {
+        ROS_INFO("Statistical outlier removal filter parameters were changed.");
+
+        doOutlierRemovalStatistical = config.doOutlierRemovalStatistical;
+        outlierRemovalNeighborsToCheck = config.outlierRemovalNeighborsToCheck;
+        outlierRemovalStdDeviationMultiplier = config.outlierRemovalStdDeviationMultiplier;
+    }
+
+    if (level & 128)
+    {
+        ROS_INFO("Euclidean clustering outlier removal filter parameters were changed.");
+
+        doOutlierRemovalClustering = config.doOutlierRemovalClustering;
+        outlierRemovalClusterTolerance = config.outlierRemovalClusterTolerance;
+        outlierRemovalMinClusterSize = config.outlierRemovalMinClusterSize;
+    }
 }
 
 void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCameraFrame::ConstPtr& msg)
@@ -153,7 +208,7 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         leftMatcher = cv::StereoSGBM::create(sgbmMinDisparity, sgbmNumDisparities, sgbmBlockSize,
             sgbmP1Multiplier * sgbmBlockSizeSquared, sgbmP2Multiplier * sgbmBlockSizeSquared, sgbmDisp12MaxDiff,
             sgbmPreFilterCap, sgbmUniquenessRatio, sgbmSpeckleWindowSize, sgbmSpeckleRange,
-            sgbmUseModeHH ? cv::StereoSGBM::MODE_HH : cv::StereoSGBM::MODE_SGBM);
+            sgbmMode == 0 ? cv::StereoSGBM::MODE_SGBM : sgbmMode == 1 ? cv::StereoSGBM::MODE_HH : sgbmMode == 2 ? cv::StereoSGBM::MODE_SGBM_3WAY : cv::StereoSGBM::MODE_HH4);
         rightMatcher = cv::ximgproc::createRightMatcher(leftMatcher);
     }
 
@@ -242,13 +297,13 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     cv::remap(imageRightOpenCVUpright, rightRectified, map1Right, map2Right, cv::INTER_LINEAR);
 
     // Perform stereo matching using semi-global matching (SGM). Somewhat copied (and modified) from copied from
-    // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
+    // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat leftDisparity, rightDisparity;
     leftMatcher->compute(leftRectified, rightRectified, leftDisparity);
     rightMatcher->compute(rightRectified, leftRectified, rightDisparity);
 
     // Perform filtering. Somewhat copied (and modified) from copied from
-    // https://docs.opencv.org/4.x/d3/d14/tutorial_ximgproc_disparity_filtering.html
+    // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
     cv::Mat filteredDisparity;
     wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity, validPixelsRectLeft);
 
@@ -289,17 +344,33 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         }
     }
 
-    // TODO: Point cloud downsampling and outlier removal.
+    // Downsample the point cloud to ensure that the point density is not too high.
+    if (doDownsampling)
+        pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, downsamplingLeafSize);
 
-    // Publish the point cloud.
-    sensor_msgs::PointCloud2 pointCloudMessage;
-    pcl::toROSMsg(*pointCloudCamSpace, pointCloudMessage);
-    pointCloudMessage.header.seq = sequenceNumber;
-    pointCloudMessage.header.stamp = time;
-    pointCloudMessage.header.frame_id = "hololens_stereo_cam_left";
-    pointCloudPublisher.publish(pointCloudMessage);
+    // Remove outliers (errors caused by wrong disparity estimations, extremely noisy values, ...) from the point cloud.
+    if (doOutlierRemovalRadius)
+    {
+        pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch,
+                outlierRemovalMinNeighborsInRadius);
+    }
+    if (doOutlierRemovalStatistical)
+    {
+        pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck,
+                outlierRemovalStdDeviationMultiplier);
+    }
+    if (doOutlierRemovalClustering)
+    {
+        pointCloudCamSpace = removeOutliersClustering(pointCloudCamSpace, outlierRemovalClusterTolerance,
+                outlierRemovalMinClusterSize);
+    }
 
-    // Publish the images, the disparity map and the HoloLens's current position.
+    // Calculate the transformation from camera space to world space and transform the point cloud.
+    Eigen::Matrix4f camToWorld = computeCamToWorldFromStereoCameraFrame(msg);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
+
+    // Publish the images, the disparity map, the point cloud and the HoloLens's current position.
     publishHololensPosition(translationLeft, stereoCamLeftPositionPublisher, sequenceNumber, time);
     publishHololensPosition(translationRight, stereoCamRightPositionPublisher, sequenceNumber, time);
     publishHololensPosition(translationCenter, hololensPositionPublisher, sequenceNumber, time);
@@ -311,7 +382,125 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     stereoImageRightPublisher.publish(imageToMsg(rightRectified, "hololens_stereo_cam_right", sequenceNumber, time));
     publishDisparityMap(leftDisparity, disparityMapRawPublisher, sequenceNumber, time);
     publishDisparityMap(filteredDisparity, disparityMapPublisher, sequenceNumber, time);
+    publishPointCloud(pointCloudWorldSpace, pointCloudPublisher, sequenceNumber, time, "hololens_world");
     sequenceNumber++;
+}
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr StereoImageReceiver::downsamplePointCloud(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
+    const float leafSize)
+{
+    // Create a point cloud in which we will store the results.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudDownsampled (new pcl::PointCloud<pcl::PointXYZI>());
+
+    // Downsample the given point cloud using a voxel grid filter.
+    pcl::VoxelGrid<pcl::PointXYZI> voxelGrid;
+    voxelGrid.setInputCloud(pointCloudToDownsample);
+    voxelGrid.setLeafSize(leafSize, leafSize, leafSize);
+    voxelGrid.filter(*pointCloudDownsampled);
+
+    // Return the downsampled point cloud.
+    return pointCloudDownsampled;
+}
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr StereoImageReceiver::removeOutliersRadius(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+    const float radiusSearch,
+    const int minNeighborsInRadius)
+{
+    // Create a point cloud in which we will store the results.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudFiltered (new pcl::PointCloud<pcl::PointXYZI>());
+
+    // Remove outliers by using a radius outlier removal.
+    pcl::RadiusOutlierRemoval<pcl::PointXYZI> radiusOutlierRemoval;
+    radiusOutlierRemoval.setInputCloud(pointCloudToFilter);
+    radiusOutlierRemoval.setRadiusSearch(radiusSearch);
+    radiusOutlierRemoval.setMinNeighborsInRadius(minNeighborsInRadius);
+    radiusOutlierRemoval.filter(*pointCloudFiltered);
+
+    // Return the point cloud with the outliers removed.
+    return pointCloudFiltered;
+}
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr StereoImageReceiver::removeOutliersStatistical(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+    const float numNeighborsToCheck,
+    const float standardDeviationMultiplier)
+{
+    // Create a point cloud in which we will store the results.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudFiltered (new pcl::PointCloud<pcl::PointXYZI>());
+
+    // Remove outliers by using a statistical outlier removal.
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZI> statisticalOutlierRemoval;
+    statisticalOutlierRemoval.setInputCloud(pointCloudToFilter);
+    statisticalOutlierRemoval.setMeanK(numNeighborsToCheck);
+    statisticalOutlierRemoval.setStddevMulThresh(standardDeviationMultiplier);
+    statisticalOutlierRemoval.filter(*pointCloudFiltered);
+
+    // Return the point cloud with the outliers removed.
+    return pointCloudFiltered;
+}
+
+pcl::PointCloud<pcl::PointXYZI>::Ptr StereoImageReceiver::removeOutliersClustering(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+    const double clusterTolerance,
+    const int minClusterSize)
+{
+    // Set up a KD tree for searching inside the cloud.
+    pcl::search::KdTree<pcl::PointXYZI>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZI>());
+    tree->setInputCloud(pointCloudToFilter);
+    
+    // Create a vector for storing the detected point indices of each cluster.
+    std::vector<pcl::PointIndices> clusters;
+
+    // Extract the clusters of the point cloud.
+    pcl::EuclideanClusterExtraction<pcl::PointXYZI> clusterExtraction;
+    clusterExtraction.setClusterTolerance(clusterTolerance);
+    clusterExtraction.setSearchMethod(tree);
+    clusterExtraction.setInputCloud(pointCloudToFilter);
+    clusterExtraction.extract(clusters);
+
+    // Create an indices extractor for removing each cluster from the cloud.
+    pcl::ExtractIndices<pcl::PointXYZI> extract;
+    extract.setInputCloud(pointCloudToFilter);
+
+    // Iterate over all found clusters and add all big enough clusters to the filtered point cloud.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr filteredPointCloud (new pcl::PointCloud<pcl::PointXYZI>());
+    for (std::vector<pcl::PointIndices>::const_iterator iter = clusters.begin(); iter != clusters.end(); ++iter)
+    {
+        if (iter->indices.size() >= minClusterSize)
+        {
+            for (const auto& idx : iter->indices)
+            {
+                filteredPointCloud->push_back((*pointCloudToFilter)[idx]);
+            }
+        }
+    }
+
+    return filteredPointCloud;
+}
+
+Eigen::Matrix4f StereoImageReceiver::computeCamToWorldFromStereoCameraFrame(
+    const hololens_msgs::StereoCameraFrame::ConstPtr& stereoCamFrame)
+{
+    // Create the camera to world transformation matrix which will be returned later on.
+    Eigen::Matrix4f camToWorld = Eigen::Matrix4f::Identity();
+
+    // Set the rotational part of the camera to world transformation matrix.
+    camToWorld.block(0, 0, 3, 3) = Eigen::Quaternionf(
+        stereoCamFrame->camToWorldRotationLeft.w, 
+        stereoCamFrame->camToWorldRotationLeft.x, 
+        stereoCamFrame->camToWorldRotationLeft.y, 
+        stereoCamFrame->camToWorldRotationLeft.z
+    ).toRotationMatrix();
+
+    // Set the translational part of the camera to world transformation matrix.
+    camToWorld(0, 3) = stereoCamFrame->camToWorldTranslationLeft.x;
+    camToWorld(1, 3) = stereoCamFrame->camToWorldTranslationLeft.y;
+    camToWorld(2, 3) = stereoCamFrame->camToWorldTranslationLeft.z;
+
+    // Return the camera to world transformation matrix.
+    return camToWorld;
 }
 
 sensor_msgs::Image StereoImageReceiver::imageToMsg(
@@ -423,6 +612,35 @@ void StereoImageReceiver::publishDisparityMap(
     disparityMsg.image = disparityVisualization;
 
     publisher.publish(disparityMsg);
+}
+
+void StereoImageReceiver::pointCloudToMsg(
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+    sensor_msgs::PointCloud2& message,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
+{
+    // Create the ROS message for the point cloud and store the point cloud inside it.
+    pcl::toROSMsg(*cloud, message);
+
+    // Set the header of the message.
+    message.header.seq = sequenceNumber;
+    message.header.stamp = timestamp;
+    message.header.frame_id = frameId;
+}
+
+void StereoImageReceiver::publishPointCloud(
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+    const ros::Publisher& publisher,
+    uint32_t sequenceNumber,
+    const ros::Time& timestamp,
+    const std::string frameId)
+{
+    sensor_msgs::PointCloud2 pointCloudMessage;
+    pointCloudToMsg(cloud, pointCloudMessage, sequenceNumber, timestamp, frameId);
+
+    publisher.publish(pointCloudMessage);
 }
 
 void StereoImageReceiver::publishHololensPosition(

@@ -30,6 +30,12 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/filters/radius_outlier_removal.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/segmentation/extract_clusters.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <dynamic_reconfigure/server.h>
@@ -45,6 +51,33 @@ public:
     void handleReconfiguration(hololens_stereo_image_receiver::StereoImageReceiverConfig& config, uint32_t level);
 
 private:
+    // Downsamples a given point cloud.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr downsamplePointCloud(
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
+        const float leafSize);
+    
+    // Removes outliers from a given point cloud with a radius outlier removal filter.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr removeOutliersRadius(
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+        const float radiusSearch,
+        const int minNeighborsInRadius);
+
+    // Removes outliers from a given point cloud with a statistical outlier removal filter.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr removeOutliersStatistical(
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+        const float numNeighborsToCheck,
+        const float standardDeviationMultiplier);
+
+    // Removes outliers from a given point cloud by clustering the points and discarding too small clusters.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr removeOutliersClustering(
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToFilter,
+        const double clusterTolerance,
+        const int minClusterSize);
+
+    // Computes the transformation matrix for transforming from camera space to world space.
+    Eigen::Matrix4f computeCamToWorldFromStereoCameraFrame(
+        const hololens_msgs::StereoCameraFrame::ConstPtr& stereoCamFrame);
+
     // Methods for publishing the results.
     sensor_msgs::Image imageToMsg(
         const Image image,
@@ -67,6 +100,18 @@ private:
         const ros::Publisher& publisher,
         uint32_t sequenceNumber,
         const ros::Time& timestamp);
+    void pointCloudToMsg(
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+        sensor_msgs::PointCloud2& message,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const std::string frameId);
+    void publishPointCloud(
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
+        const ros::Publisher& publisher,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp,
+        const std::string frameId);
     void publishHololensPosition(
         const hololens_msgs::Point& position,
         const ros::Publisher& publisher,
@@ -104,7 +149,7 @@ private:
     int sgbmUniquenessRatio;
     int sgbmSpeckleWindowSize;
     int sgbmSpeckleRange;
-    bool sgbmUseModeHH;
+    int sgbmMode;
     bool updateMatchers = false;
     cv::Ptr<cv::StereoSGBM> leftMatcher;
     cv::Ptr<cv::StereoMatcher> rightMatcher;
@@ -121,6 +166,25 @@ private:
     // Parameters for reconstruction of a point cloud from the disparity map.
     bool reconstructPointCloudFromRawDisparityMap;
     float minDisparityForReconstruction;
+
+    // Parameters for point cloud downsampling.
+    bool doDownsampling;
+    float downsamplingLeafSize;
+
+    // Parameters for point cloud outlier removal using a radius outlier removal filter.
+    bool doOutlierRemovalRadius;
+    double outlierRemovalRadiusSearch;
+    int outlierRemovalMinNeighborsInRadius;
+
+    // Parameters for point cloud outlier removal using a statistical outlier removal filter.
+    bool doOutlierRemovalStatistical;
+    int outlierRemovalNeighborsToCheck;
+    double outlierRemovalStdDeviationMultiplier;
+
+    // Parameters for point cloud outlier removal using euclidean clustering.
+    bool doOutlierRemovalClustering;
+    double outlierRemovalClusterTolerance;
+    int outlierRemovalMinClusterSize;
 
     // ROS publishers.
     ros::Publisher stereoImageLeftRawPublisher;
