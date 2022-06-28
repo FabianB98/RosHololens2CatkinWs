@@ -10,3 +10,5 @@ Point camToWorldTranslationLeft
 Point camToWorldTranslationRight
 Quaternion camToWorldRotationLeft
 Quaternion camToWorldRotationRight
+int64 timeLeft
+int64 timeRight

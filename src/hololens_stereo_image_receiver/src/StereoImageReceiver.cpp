@@ -235,6 +235,16 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     translationCenter.y = (translationLeft.y + translationRight.y) / 2.0;
     translationCenter.z = (translationLeft.z + translationRight.z) / 2.0;
 
+    // Determine the time delta between the two images.
+    // One clock tick of the HoloLens 2 corresponds to 100 nanoseconds, so there are 10 000 000 ticks per second or 
+    // 10 000 ticks per millisecond.
+    const int64_t& timeLeftTicks = msg->timeLeft;
+    const int64_t& timeRightTicks = msg->timeRight;
+    double timeLeftMillis = timeLeftTicks / 10000.0;
+    double timeRightMillis = timeRightTicks / 10000.0;
+    double timeDifferenceMillis = timeRightMillis - timeLeftMillis;
+    ROS_INFO("Time left: %f, time right: %f, time difference: %f ms", timeLeftMillis, timeRightMillis, timeDifferenceMillis);
+
     // Convert the two images to sensor_msgs::Image instances.
     ros::Time time = ros::Time::now();
     sensor_msgs::Image imageMsgLeft = imageToMsg(imageLeft, "hololens_stereo_cam_left", sequenceNumber, time);
