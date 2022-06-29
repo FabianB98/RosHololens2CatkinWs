@@ -127,11 +127,11 @@ Object3dDetector::Object3dDetector() {
       x_upper_ = atof(params[1].c_str());
       int i = 0;
       while(std::getline(range_file, line)) {
-	boost::split(params, line, boost::is_any_of(" "));
-	svm_scale_range_[i][0] = atof(params[1].c_str());
-	svm_scale_range_[i][1] = atof(params[2].c_str());
-	i++;
-	//std::cerr << i << " " <<  svm_scale_range_[i][0] << " " << svm_scale_range_[i][1] << std::endl;
+        boost::split(params, line, boost::is_any_of(" "));
+        svm_scale_range_[i][0] = atof(params[1].c_str());
+        svm_scale_range_[i][1] = atof(params[2].c_str());
+        i++;
+        //std::cerr << i << " " <<  svm_scale_range_[i][0] << " " << svm_scale_range_[i][1] << std::endl;
       }
       use_svm_model_ = true;
     }
@@ -145,6 +145,7 @@ Object3dDetector::~Object3dDetector() {
   }
 }
 
+int counter = 0;
 int frames; clock_t start_time; bool reset = true;//fps
 void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg) {
   if(print_fps_)if(reset){frames=0;start_time=clock();reset=false;}//fps
@@ -161,6 +162,17 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
   hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
+
+  // TODO: This is just temporary code for extracting the point clouds so they can be annotated manually. Needs to be removed later on...
+  // std::string home = std::string(getenv("HOME"));
+  // std::string directory = home + "/point_clouds/";
+  // std::string filename = boost::lexical_cast<std::string>(counter++);
+  // std::string prefix = directory + filename;
+  // boost::filesystem::create_directories(directory);
+  // if (pcl_pc->size() > 0)
+  // {
+  //     pcl::io::savePCDFileBinary(prefix + ".pcd", *pcl_pc);
+  // }
   
   extractCluster(pcl_pc, sensor_position);
   classify();
@@ -315,14 +327,14 @@ void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, p
 	
       	// Size limitation is not reasonable, but it can increase fps.
       	if(human_size_limit_ &&
-	   (max[0]-min[0] < 0.2 || max[0]-min[0] > 1.0 ||
-	    max[1]-min[1] < 0.2 || max[1]-min[1] > 1.0 ||
-	    max[2]-min[2] < 0.5 || max[2]-min[2] > 2.0)) 
-	  continue;
+            (max[0]-min[0] < 0.2 || max[0]-min[0] > 1.0 ||
+            max[1]-min[1] < 0.2 || max[1]-min[1] > 1.0 ||
+            max[2]-min[2] < 0.5 || max[2]-min[2] > 2.0)) 
+          continue;
 	
-	Feature f;
-	extractFeature(cluster, f, min, max, centroid);
-	features_.push_back(f);
+        Feature f;
+        extractFeature(cluster, f, min, max, centroid);
+        features_.push_back(f);
       }
     }
   }
@@ -391,9 +403,9 @@ void compute3ZoneCovarianceMatrix(pcl::PointCloud<pcl::PointXYZI>::Ptr plane, Ei
       zone_decomposed[0]->points.push_back(plane->points[i]);
     } else {
       if(plane->points[i].y >= mean(1)) // left lower half
-	zone_decomposed[1]->points.push_back(plane->points[i]);
+        zone_decomposed[1]->points.push_back(plane->points[i]);
       else // right lower half
-	zone_decomposed[2]->points.push_back(plane->points[i]);
+        zone_decomposed[2]->points.push_back(plane->points[i]);
     }
   }
   
@@ -418,11 +430,11 @@ void computeHistogramNormalized(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int hor
   for(int i = 0; i < horiz_bins; i++) {
     for(int j = 0; j < verti_bins; j++) {
       if(max[0]-min[0] > max[1]-min[1]) {
-	min_box << min[0]+horiz_itv*i, min[1], min[2]+verti_itv*j, 0;
-	max_box << min[0]+horiz_itv*(i+1), max[1], min[2]+verti_itv*(j+1), 0;
+        min_box << min[0]+horiz_itv*i, min[1], min[2]+verti_itv*j, 0;
+        max_box << min[0]+horiz_itv*(i+1), max[1], min[2]+verti_itv*(j+1), 0;
       } else {
-	min_box << min[0], min[1]+horiz_itv*i, min[2]+verti_itv*j, 0;
-	max_box << max[0], min[1]+horiz_itv*(i+1), min[2]+verti_itv*(j+1), 0;
+        min_box << min[0], min[1]+horiz_itv*i, min[2]+verti_itv*j, 0;
+        max_box << max[0], min[1]+horiz_itv*(i+1), min[2]+verti_itv*(j+1), 0;
       }
       std::vector<int> indices;
       pcl::getPointsInBox(*pc, min_box, max_box, indices);
@@ -449,14 +461,14 @@ void computeSlice(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int n, float *slice) 
     Eigen::Vector4f block_min, block_max;
     for(int i = 0; i < n; i++) {
       if(blocks[i]->size() > 0) {
-	// pcl::PCA<pcl::PointXYZI> pca;
-	// pcl::PointCloud<pcl::PointXYZI>::Ptr block_projected(new pcl::PointCloud<pcl::PointXYZI>);
-	// pca.setInputCloud(blocks[i]);
-	// pca.project(*blocks[i], *block_projected);
-	pcl::getMinMax3D(*blocks[i], block_min, block_max);
+        // pcl::PCA<pcl::PointXYZI> pca;
+        // pcl::PointCloud<pcl::PointXYZI>::Ptr block_projected(new pcl::PointCloud<pcl::PointXYZI>);
+        // pca.setInputCloud(blocks[i]);
+        // pca.project(*blocks[i], *block_projected);
+        pcl::getMinMax3D(*blocks[i], block_min, block_max);
       } else {
-	block_min.setZero();
-	block_max.setZero();
+        block_min.setZero();
+        block_max.setZero();
       }
       slice[i*2] = block_max[0] - block_min[0];
       slice[i*2+1] = block_max[1] - block_min[1];
@@ -504,7 +516,7 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
     for(int i = 0; i < pc->size(); i++) {
       d2 = pc->points[i].x*pc->points[i].x + pc->points[i].y*pc->points[i].y + pc->points[i].z*pc->points[i].z;
       if(f.min_distance > d2)
-	f.min_distance = d2;
+	      f.min_distance = d2;
     }
     //f.min_distance = sqrt(f.min_distance);
     
@@ -598,10 +610,10 @@ void Object3dDetector::classify() {
       
       // predict
       if(is_probability_model_) {
-	double prob_estimates[svm_model_->nr_class];
+	      double prob_estimates[svm_model_->nr_class];
       	svm_predict_probability(svm_model_, svm_node_, prob_estimates);
-	if(prob_estimates[0] < human_probability_)
-	  continue;
+	      if(prob_estimates[0] < human_probability_)
+	        continue;
       } else {
       	if(svm_predict(svm_model_, svm_node_) != 1)
       	  continue;
@@ -641,8 +653,8 @@ void Object3dDetector::classify() {
     p[23].x = it->max[0]; p[23].y = it->min[1]; p[23].z = it->min[2];
     for(int i = 0; i < 24; i++)
       marker.points.push_back(p[i]);
-    marker.scale.x = 0.02;
-    marker.color.a = 1.0;
+      marker.scale.x = 0.02;
+      marker.color.a = 1.0;
     if(!use_svm_model_) {
       marker.color.r = 0.0;
       marker.color.g = 0.5;

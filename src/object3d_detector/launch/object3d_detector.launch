@@ -6,11 +6,15 @@
 
   <!-- FLOBOT 3D Object Detector -->
   <node pkg="object3d_detector" type="object3d_detector" name="object3d_detector" output="screen" respawn="false">
-    <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian.model"/>
-    <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian.range"/>
+    <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.model"/>
+    <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.range"/>
 
     <param name="print_fps" type="bool" value="false"/>
     <param name="frame_id" type="string" value="odom"/>
+
+    <param name="cluster_size_min" type="int" value="5"/>
+    <param name="cluster_size_max" type="int" value="30000"/>
+    <param name="human_probability" type="double" value="0.7"/>
   </node>
   
   <!-- NBellotto's Bayes People Tracker -->

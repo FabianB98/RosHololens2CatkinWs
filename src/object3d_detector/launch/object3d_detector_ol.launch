@@ -8,6 +8,10 @@
   <node pkg="object3d_detector" type="object3d_detector_ol" name="object3d_detector_ol" output="screen" respawn="false">
     <param name="print_fps" type="bool" value="false"/>
     <param name="frame_id" type="string" value="odom"/>
+
+    <param name="cluster_size_min" type="int" value="5"/>
+    <param name="cluster_size_max" type="int" value="50000"/>
+    <param name="human_probability" type="double" value="0.5"/>
   </node>
   
   <!-- NBellotto's Bayes People Tracker -->
