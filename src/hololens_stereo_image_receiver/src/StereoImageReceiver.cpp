@@ -4,8 +4,7 @@
 // parameter which can be configured over a parameter file, as the images only need to be saved once for camera
 // calibration.
 #define SAVE_IMAGES_TO_DISK false
-// Hardcoding file paths is definitely not a good idea, but using ~ in the path didn't work...
-#define IMAGE_PATH_PREFIX "/home/boesing_uvrtq/stereoCameraImgs/"
+#define IMAGE_PATH_PREFIX_RELATIVE_TO_HOME "/stereoCameraImgs/"
 
 StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
 {
@@ -267,10 +266,17 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     // Save the raw images to disk (for calibrating the cameras)
     if (SAVE_IMAGES_TO_DISK)
     {
-        std::string pathPrefix = std::string(IMAGE_PATH_PREFIX);
+        std::string home = std::string(getenv("HOME"));
+
+        std::string pathPrefix = home + IMAGE_PATH_PREFIX_RELATIVE_TO_HOME;
+        std::string leftDirectory = pathPrefix + "left/";
+        std::string rightDirectory = pathPrefix + "right/";
+        boost::filesystem::create_directories(leftDirectory);
+        boost::filesystem::create_directories(rightDirectory);
+
         std::string fileName = std::to_string(sequenceNumber);
-        std::string leftPath = pathPrefix + "left/" + fileName + ".png";
-        std::string rightPath = pathPrefix + "right/" + fileName + ".png";
+        std::string leftPath = leftDirectory + fileName + ".png";
+        std::string rightPath = rightDirectory + fileName + ".png";
         cv::imwrite(leftPath.c_str(), imageLeftOpenCVUpright);
         cv::imwrite(rightPath.c_str(), imageRightOpenCVUpright);
     }
