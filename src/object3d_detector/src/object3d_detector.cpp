@@ -40,6 +40,13 @@ typedef struct feature {
 
 static const int FEATURE_SIZE = 61;
 
+// A compile time switch which defines whether the individual point clouds should be saved to disk. This doesn't need to
+// be a parameter which can be configured over a parameter file, as we only need save some frames for manual annotation.
+// Furthermore, this only needs to be done once to train the SVM from scratch such that it's able to distinguish between
+// humans and non-humans correctly in most cases. Fine-tuning can then be done online (as mentioned in the paper).
+#define SAVE_POINT_CLOUDS_TO_DISK false
+#define POINT_CLOUD_PATH_PREFIX_RELATIVE_TO_HOME "/pointCloudFrames/"
+
 class Object3dDetector {
 private:
   /*** Publishers and Subscribers ***/
@@ -50,8 +57,11 @@ private:
   
   bool print_fps_;
   std::string frame_id_;
-  float z_limit_min_;
-  float z_limit_max_;
+  float floor_height;
+  float ceiling_height;
+  float floor_ceiling_update_threshold;
+  float floor_ceiling_noise_threshold;
+  int min_points_in_floor_ceiling;
   int cluster_size_min_;
   int cluster_size_max_;
   
@@ -92,12 +102,16 @@ Object3dDetector::Object3dDetector() {
   /*** Parameters ***/
   private_nh.param<bool>("print_fps", print_fps_, false);
   private_nh.param<std::string>("frame_id", frame_id_, "velodyne");
-  private_nh.param<float>("z_limit_min", z_limit_min_, -0.8);
-  private_nh.param<float>("z_limit_max", z_limit_max_, 1.2);
+  private_nh.param<float>("floor_ceiling_update_threshold", floor_ceiling_update_threshold, 0.15);
+  private_nh.param<float>("floor_ceiling_noise_threshold", floor_ceiling_noise_threshold, 0.1);
+  private_nh.param<int>("min_points_in_floor_ceiling", min_points_in_floor_ceiling, 5000);
   private_nh.param<int>("cluster_size_min", cluster_size_min_, 5);
   private_nh.param<int>("cluster_size_max", cluster_size_max_, 30000);
   private_nh.param<float>("human_probability", human_probability_, 0.7);
   private_nh.param<bool>("human_size_limit", human_size_limit_, false);
+
+  floor_height = 0.0;
+  ceiling_height = 0.0;
   
   /****** load a pre-trained svm model ******/
   private_nh.param<std::string>("model_file_name", model_file_name_, "");
@@ -163,28 +177,20 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
 
-  // TODO: This is just temporary code for extracting the point clouds so they can be annotated manually. Needs to be removed later on...
-  // std::string home = std::string(getenv("HOME"));
-  // std::string directory = home + "/point_clouds/";
-  // std::string filename = boost::lexical_cast<std::string>(counter++);
-  // std::string prefix = directory + filename;
-  // boost::filesystem::create_directories(directory);
-  // if (pcl_pc->size() > 0)
-  // {
-  //     pcl::io::savePCDFileBinary(prefix + ".pcd", *pcl_pc);
-  // }
+  if (SAVE_POINT_CLOUDS_TO_DISK && pcl_pc->size() > 0) {
+    std::string home = std::string(getenv("HOME"));
+    std::string directory = home + POINT_CLOUD_PATH_PREFIX_RELATIVE_TO_HOME;
+    std::string filename = boost::lexical_cast<std::string>(counter++);
+    std::string prefix = directory + filename;
+    boost::filesystem::create_directories(directory);
+    pcl::io::savePCDFileBinary(prefix + ".pcd", *pcl_pc);
+  }
   
   extractCluster(pcl_pc, sensor_position);
   classify();
   
   if(print_fps_)if(++frames>10){std::cerr<<"[object3d_detector]: fps = "<<float(frames)/(float(clock()-start_time)/CLOCKS_PER_SEC)<<", timestamp = "<<clock()/CLOCKS_PER_SEC<<std::endl;reset = true;}//fps
 }
-
-float floor_height = 0.0;
-float ceiling_height = 0.0;
-const float floor_ceiling_update_threshold = 0.15;
-const float floor_ceiling_noise_threshold = 0.1;
-const int min_points_in_floor_ceiling = 5000;
 
 const int nested_regions_ = 14;
 int zone_[nested_regions_] = {2,3,3,3,3,3,3,2,3,3,3,3,3,3}; // for more details, see our IROS'17 paper.
