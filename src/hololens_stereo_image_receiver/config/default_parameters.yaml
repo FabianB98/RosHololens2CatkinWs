@@ -4,6 +4,8 @@
 
 # Camera intrinsics of the stereo cameras.
 stereoCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/stereo_cam_calibration.yml
+leftCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/left_cam_calibration.yaml
+rightCamCalibrationFilePath: $(find hololens_stereo_image_receiver)/config/right_cam_calibration.yaml
 
 # Parameters for preprocessing the raw stereo images.
 preprocessingDoImageNormalization: false

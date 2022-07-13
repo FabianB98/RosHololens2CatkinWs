@@ -5,7 +5,10 @@
 #include "Topics.h"
 
 #include "ros/ros.h"
+
+#include "camera_calibration_parsers/parse.h"
 #include "std_msgs/Header.h"
+#include "sensor_msgs/CameraInfo.h"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
 #include "sensor_msgs/PointCloud2.h"
@@ -132,6 +135,11 @@ private:
     cv::Rect validPixelsRectLeft;
     cv::Rect validPixelsRectRight;
 
+    std::string leftCameraName;
+    std::string rightCameraName;
+    sensor_msgs::CameraInfo leftCameraInfo;
+    sensor_msgs::CameraInfo rightCameraInfo;
+
     // Parameters for preprocessing the raw stereo images.
     bool preprocessingDoImageNormalization;
     bool preprocessingDoHistogramEqualization;
@@ -187,6 +195,8 @@ private:
     int outlierRemovalMinClusterSize;
 
     // ROS publishers.
+    ros::Publisher cameraInfoLeftPublisher;
+    ros::Publisher cameraInfoRightPublisher;
     ros::Publisher stereoImageLeftRawPublisher;
     ros::Publisher stereoImageRightRawPublisher;
     ros::Publisher stereoImageLeftPublisher;

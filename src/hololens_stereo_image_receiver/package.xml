@@ -56,12 +56,14 @@
   <build_depend>cv_bridge</build_depend>
   <build_depend>libpcl-all-dev</build_depend>
   <build_depend>dynamic_reconfigure</build_depend>
+  <build_depend>camera_calibration_parsers</build_depend>
   <build_export_depend>hololens_msgs</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
   <build_export_depend>tf</build_export_depend>
   <build_export_depend>cv_bridge</build_export_depend>
   <build_export_depend>dynamic_reconfigure</build_export_depend>
+  <build_export_depend>camera_calibration_parsers</build_export_depend>
   <exec_depend>hololens_msgs</exec_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
@@ -69,6 +71,7 @@
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>libpcl_all</exec_depend>
   <exec_depend>dynamic_reconfigure</exec_depend>
+  <exec_depend>camera_calibration_parsers</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

@@ -10,7 +10,7 @@
     <param name="frame_id" type="string" value="odom"/>
 
     <param name="cluster_size_min" type="int" value="5"/>
-    <param name="cluster_size_max" type="int" value="50000"/>
+    <param name="cluster_size_max" type="int" value="30000"/>
     <param name="human_probability" type="double" value="0.5"/>
   </node>
   

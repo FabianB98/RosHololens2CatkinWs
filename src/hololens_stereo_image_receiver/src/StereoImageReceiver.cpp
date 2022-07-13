@@ -27,6 +27,13 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     fs1["P2"] >> PRight;
     fs1["Q"] >> Q;
     undistortRectifyMapInitialized = false;
+    
+    std::string leftCamCalibrationFilePath;
+    std::string rightCamCalibrationFilePath;
+    n.param("leftCamCalibrationFilePath", leftCamCalibrationFilePath, std::string(""));
+    n.param("rightCamCalibrationFilePath", rightCamCalibrationFilePath, std::string(""));
+    camera_calibration_parsers::readCalibration(leftCamCalibrationFilePath, leftCameraName, leftCameraInfo);
+    camera_calibration_parsers::readCalibration(rightCamCalibrationFilePath, rightCameraName, rightCameraInfo);
 
     // Initialize all parameters for preprocessing as defined by configuration (or default values).
     n.param("preprocessingDoImageNormalization", preprocessingDoImageNormalization, false);
@@ -88,6 +95,8 @@ StereoImageReceiver::StereoImageReceiver(ros::NodeHandle n)
     n.param("outlierRemovalClusterTolerance", outlierRemovalClusterTolerance, 0.08);
     n.param("outlierRemovalMinClusterSize", outlierRemovalMinClusterSize, 500);
 
+    cameraInfoLeftPublisher = n.advertise<sensor_msgs::CameraInfo>(STEREO_IMAGE_LEFT_CAM_INFO_TOPIC, 10);
+    cameraInfoRightPublisher = n.advertise<sensor_msgs::CameraInfo>(STEREO_IMAGE_RIGHT_CAM_INFO_TOPIC, 10);
     stereoImageLeftRawPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_LEFT_RAW_TOPIC, 10);
     stereoImageRightRawPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_RIGHT_RAW_TOPIC, 10);
     stereoImageLeftPublisher = n.advertise<sensor_msgs::Image>(STEREO_IMAGE_LEFT_TOPIC, 10);
@@ -281,110 +290,110 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
         cv::imwrite(rightPath.c_str(), imageRightOpenCVUpright);
     }
 
-    // Perform image preprocessing if needed.
-    if (preprocessingDoImageNormalization)
-    {
-        cv::normalize(imageLeftOpenCVUpright, imageLeftOpenCVUpright, 0, 255, cv::NORM_MINMAX);
-        cv::normalize(imageRightOpenCVUpright, imageRightOpenCVUpright, 0, 255, cv::NORM_MINMAX);
-    }
-    if (preprocessingDoHistogramEqualization)
-    {
-        cv::equalizeHist(imageLeftOpenCVUpright, imageLeftOpenCVUpright);
-        cv::equalizeHist(imageRightOpenCVUpright, imageRightOpenCVUpright);
-    }
-    if (preprocessingDoMedianFiltering)
-    {
-        cv::medianBlur(imageLeftOpenCVUpright, imageLeftOpenCVUpright, preprocessingMedianFilterKernelSize);
-        cv::medianBlur(imageRightOpenCVUpright, imageRightOpenCVUpright, preprocessingMedianFilterKernelSize);
-    }
+    // // Perform image preprocessing if needed.
+    // if (preprocessingDoImageNormalization)
+    // {
+    //     cv::normalize(imageLeftOpenCVUpright, imageLeftOpenCVUpright, 0, 255, cv::NORM_MINMAX);
+    //     cv::normalize(imageRightOpenCVUpright, imageRightOpenCVUpright, 0, 255, cv::NORM_MINMAX);
+    // }
+    // if (preprocessingDoHistogramEqualization)
+    // {
+    //     cv::equalizeHist(imageLeftOpenCVUpright, imageLeftOpenCVUpright);
+    //     cv::equalizeHist(imageRightOpenCVUpright, imageRightOpenCVUpright);
+    // }
+    // if (preprocessingDoMedianFiltering)
+    // {
+    //     cv::medianBlur(imageLeftOpenCVUpright, imageLeftOpenCVUpright, preprocessingMedianFilterKernelSize);
+    //     cv::medianBlur(imageRightOpenCVUpright, imageRightOpenCVUpright, preprocessingMedianFilterKernelSize);
+    // }
 
-    // Rectify the images.
-    if (!undistortRectifyMapInitialized)
-    {
-        cv::stereoRectify(KLeft, DLeft, KRight, DRight, imageLeftOpenCVUpright.size(), R, T, RLeft, RRight, PLeft, PRight, Q,
-                cv::CALIB_ZERO_DISPARITY, -1.0, cv::Size(), &validPixelsRectLeft, &validPixelsRectRight);
+    // // Rectify the images.
+    // if (!undistortRectifyMapInitialized)
+    // {
+    //     cv::stereoRectify(KLeft, DLeft, KRight, DRight, imageLeftOpenCVUpright.size(), R, T, RLeft, RRight, PLeft, PRight, Q,
+    //             cv::CALIB_ZERO_DISPARITY, -1.0, cv::Size(), &validPixelsRectLeft, &validPixelsRectRight);
 
-        cv::initUndistortRectifyMap(KLeft, DLeft, RLeft, PLeft, imageLeftOpenCVUpright.size(), CV_32F, map1Left, map2Left);
-        cv::initUndistortRectifyMap(KRight, DRight, RRight, PRight, imageRightOpenCVUpright.size(), CV_32F, map1Right, map2Right);
-        undistortRectifyMapInitialized = true;
-    }
-    cv::Mat leftRectified, rightRectified;
-    cv::remap(imageLeftOpenCVUpright, leftRectified, map1Left, map2Left, cv::INTER_LINEAR);
-    cv::remap(imageRightOpenCVUpright, rightRectified, map1Right, map2Right, cv::INTER_LINEAR);
+    //     cv::initUndistortRectifyMap(KLeft, DLeft, RLeft, PLeft, imageLeftOpenCVUpright.size(), CV_32F, map1Left, map2Left);
+    //     cv::initUndistortRectifyMap(KRight, DRight, RRight, PRight, imageRightOpenCVUpright.size(), CV_32F, map1Right, map2Right);
+    //     undistortRectifyMapInitialized = true;
+    // }
+    // cv::Mat leftRectified, rightRectified;
+    // cv::remap(imageLeftOpenCVUpright, leftRectified, map1Left, map2Left, cv::INTER_LINEAR);
+    // cv::remap(imageRightOpenCVUpright, rightRectified, map1Right, map2Right, cv::INTER_LINEAR);
 
-    // Perform stereo matching using semi-global matching (SGM). Somewhat copied (and modified) from copied from
-    // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
-    cv::Mat leftDisparity, rightDisparity;
-    leftMatcher->compute(leftRectified, rightRectified, leftDisparity);
-    rightMatcher->compute(rightRectified, leftRectified, rightDisparity);
+    // // Perform stereo matching using semi-global matching (SGM). Somewhat copied (and modified) from copied from
+    // // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
+    // cv::Mat leftDisparity, rightDisparity;
+    // leftMatcher->compute(leftRectified, rightRectified, leftDisparity);
+    // rightMatcher->compute(rightRectified, leftRectified, rightDisparity);
 
-    // Perform filtering. Somewhat copied (and modified) from copied from
-    // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
-    cv::Mat filteredDisparity;
-    wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity, validPixelsRectLeft);
+    // // Perform filtering. Somewhat copied (and modified) from copied from
+    // // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html
+    // cv::Mat filteredDisparity;
+    // wlsFilter->filter(leftDisparity, leftRectified, filteredDisparity, rightDisparity, validPixelsRectLeft);
 
-    // Create a point cloud from the filtered disparity map.
-    // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the decimal
-    // dot and 1 channel per pixel. According to the documentation of reprojectImageTo3D these values should therefore
-    // be divided by 16 and scaled to float. If some other disparity map estimation algorithm is used, the disparity map
-    // may have some other data type, so this may not be needed in case OpenCV's StereoSGBM algorithm is replaced with
-    // some other algorithm.
-    cv::Mat reconstructionDisparityAsFloats;
-    cv::Mat& reconstructionDisparity = reconstructPointCloudFromRawDisparityMap ? leftDisparity : filteredDisparity;
-    reconstructionDisparity.convertTo(reconstructionDisparityAsFloats, CV_32F, 1.0/16.0);
-    cv::Mat points;
-    cv::reprojectImageTo3D(reconstructionDisparityAsFloats, points, Q);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
-    for (uint32_t v = validPixelsRectLeft.y; v < validPixelsRectLeft.height; v++)
-    {
-        float* disparityRow = reconstructionDisparityAsFloats.ptr<float>(v);
-        cv::Vec3f* pointsRow = points.ptr<cv::Vec3f>(v);
-        uchar* grayscaleRow = leftRectified.ptr<uchar>(v);
+    // // Create a point cloud from the filtered disparity map.
+    // // Data type of the disparity map is 16SC1, so a 16 bit signed short with 4 fixed binary digits after the decimal
+    // // dot and 1 channel per pixel. According to the documentation of reprojectImageTo3D these values should therefore
+    // // be divided by 16 and scaled to float. If some other disparity map estimation algorithm is used, the disparity map
+    // // may have some other data type, so this may not be needed in case OpenCV's StereoSGBM algorithm is replaced with
+    // // some other algorithm.
+    // cv::Mat reconstructionDisparityAsFloats;
+    // cv::Mat& reconstructionDisparity = reconstructPointCloudFromRawDisparityMap ? leftDisparity : filteredDisparity;
+    // reconstructionDisparity.convertTo(reconstructionDisparityAsFloats, CV_32F, 1.0/16.0);
+    // cv::Mat points;
+    // cv::reprojectImageTo3D(reconstructionDisparityAsFloats, points, Q);
+    // pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    // for (uint32_t v = validPixelsRectLeft.y; v < validPixelsRectLeft.height; v++)
+    // {
+    //     float* disparityRow = reconstructionDisparityAsFloats.ptr<float>(v);
+    //     cv::Vec3f* pointsRow = points.ptr<cv::Vec3f>(v);
+    //     uchar* grayscaleRow = leftRectified.ptr<uchar>(v);
 
-        for (uint32_t u = validPixelsRectLeft.x; u < validPixelsRectLeft.width; u++)
-        {
-            // Ensure that the current pixel was actually mapped to some valid point in 3D space.
-            const float disparity = disparityRow[u];
-            if (disparity <= minDisparityForReconstruction)
-                continue;
+    //     for (uint32_t u = validPixelsRectLeft.x; u < validPixelsRectLeft.width; u++)
+    //     {
+    //         // Ensure that the current pixel was actually mapped to some valid point in 3D space.
+    //         const float disparity = disparityRow[u];
+    //         if (disparity <= minDisparityForReconstruction)
+    //             continue;
 
-            // Rotate each point by 90 degrees counterclockwise around the z-axis. This is needed to undo the rotation
-            // performed on the left image. If we didn't rotate the points, the resulting point cloud would be rotated
-            // by 90 degrees clockwise around the camera's z-axis instead of being upright.
-            pcl::PointXYZI point;
-            point.x = pointsRow[u][1];
-            point.y = -pointsRow[u][0];
-            point.z = pointsRow[u][2];
-            point.intensity = static_cast<float>(grayscaleRow[u]) / 255.0;
-            pointCloudCamSpace->push_back(point);
-        }
-    }
+    //         // Rotate each point by 90 degrees counterclockwise around the z-axis. This is needed to undo the rotation
+    //         // performed on the left image. If we didn't rotate the points, the resulting point cloud would be rotated
+    //         // by 90 degrees clockwise around the camera's z-axis instead of being upright.
+    //         pcl::PointXYZI point;
+    //         point.x = pointsRow[u][1];
+    //         point.y = -pointsRow[u][0];
+    //         point.z = pointsRow[u][2];
+    //         point.intensity = static_cast<float>(grayscaleRow[u]) / 255.0;
+    //         pointCloudCamSpace->push_back(point);
+    //     }
+    // }
 
-    // Downsample the point cloud to ensure that the point density is not too high.
-    if (doDownsampling)
-        pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, downsamplingLeafSize);
+    // // Downsample the point cloud to ensure that the point density is not too high.
+    // if (doDownsampling)
+    //     pointCloudCamSpace = downsamplePointCloud(pointCloudCamSpace, downsamplingLeafSize);
 
-    // Remove outliers (errors caused by wrong disparity estimations, extremely noisy values, ...) from the point cloud.
-    if (doOutlierRemovalRadius)
-    {
-        pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch,
-                outlierRemovalMinNeighborsInRadius);
-    }
-    if (doOutlierRemovalStatistical)
-    {
-        pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck,
-                outlierRemovalStdDeviationMultiplier);
-    }
-    if (doOutlierRemovalClustering)
-    {
-        pointCloudCamSpace = removeOutliersClustering(pointCloudCamSpace, outlierRemovalClusterTolerance,
-                outlierRemovalMinClusterSize);
-    }
+    // // Remove outliers (errors caused by wrong disparity estimations, extremely noisy values, ...) from the point cloud.
+    // if (doOutlierRemovalRadius)
+    // {
+    //     pointCloudCamSpace = removeOutliersRadius(pointCloudCamSpace, outlierRemovalRadiusSearch,
+    //             outlierRemovalMinNeighborsInRadius);
+    // }
+    // if (doOutlierRemovalStatistical)
+    // {
+    //     pointCloudCamSpace = removeOutliersStatistical(pointCloudCamSpace, outlierRemovalNeighborsToCheck,
+    //             outlierRemovalStdDeviationMultiplier);
+    // }
+    // if (doOutlierRemovalClustering)
+    // {
+    //     pointCloudCamSpace = removeOutliersClustering(pointCloudCamSpace, outlierRemovalClusterTolerance,
+    //             outlierRemovalMinClusterSize);
+    // }
 
-    // Calculate the transformation from camera space to world space and transform the point cloud.
-    Eigen::Matrix4f camToWorld = computeCamToWorldFromStereoCameraFrame(msg);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
+    // // Calculate the transformation from camera space to world space and transform the point cloud.
+    // Eigen::Matrix4f camToWorld = computeCamToWorldFromStereoCameraFrame(msg);
+    // pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    // pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
 
     // Publish the images, the disparity map, the point cloud and the HoloLens's current position.
     publishHololensPosition(translationLeft, stereoCamLeftPositionPublisher, sequenceNumber, time);
@@ -392,13 +401,21 @@ void StereoImageReceiver::handleStereoCameraFrame(const hololens_msgs::StereoCam
     publishHololensPosition(translationCenter, hololensPositionPublisher, sequenceNumber, time);
     publishHololensCamToWorldTf(translationLeft, msg->camToWorldRotationLeft, "hololens_stereo_cam_left", hololensCamLeftPublisher, time);
     publishHololensCamToWorldTf(translationRight, msg->camToWorldRotationRight, "hololens_stereo_cam_right", hololensCamRightPublisher, time);
-    stereoImageLeftRawPublisher.publish(imageMsgLeft);
-    stereoImageRightRawPublisher.publish(imageMsgRight);
-    stereoImageLeftPublisher.publish(imageToMsg(leftRectified, "hololens_stereo_cam_left", sequenceNumber, time));
-    stereoImageRightPublisher.publish(imageToMsg(rightRectified, "hololens_stereo_cam_right", sequenceNumber, time));
-    publishDisparityMap(leftDisparity, disparityMapRawPublisher, sequenceNumber, time);
-    publishDisparityMap(filteredDisparity, disparityMapPublisher, sequenceNumber, time);
-    publishPointCloud(pointCloudWorldSpace, pointCloudPublisher, sequenceNumber, time, "hololens_world");
+    leftCameraInfo.header.frame_id = "hololens_stereo_cam_left";
+    leftCameraInfo.header.seq = sequenceNumber;
+    leftCameraInfo.header.stamp = time;
+    rightCameraInfo.header.frame_id = "hololens_stereo_cam_right";
+    rightCameraInfo.header.seq = sequenceNumber;
+    rightCameraInfo.header.stamp = time;
+    cameraInfoLeftPublisher.publish(leftCameraInfo);
+    cameraInfoRightPublisher.publish(rightCameraInfo);
+    stereoImageLeftRawPublisher.publish(imageToMsg(imageLeftOpenCVUpright, "hololens_stereo_cam_left", sequenceNumber, time));
+    stereoImageRightRawPublisher.publish(imageToMsg(imageRightOpenCVUpright, "hololens_stereo_cam_right", sequenceNumber, time));
+    // stereoImageLeftPublisher.publish(imageToMsg(leftRectified, "hololens_stereo_cam_left", sequenceNumber, time));
+    // stereoImageRightPublisher.publish(imageToMsg(rightRectified, "hololens_stereo_cam_right", sequenceNumber, time));
+    // publishDisparityMap(leftDisparity, disparityMapRawPublisher, sequenceNumber, time);
+    // publishDisparityMap(filteredDisparity, disparityMapPublisher, sequenceNumber, time);
+    // publishPointCloud(pointCloudWorldSpace, pointCloudPublisher, sequenceNumber, time, "hololens_world");
     sequenceNumber++;
 }
 
@@ -567,7 +584,7 @@ cv_bridge::CvImage StereoImageReceiver::imageToMsg(
     imageMsg.header.stamp = timestamp;
     imageMsg.header.frame_id = frameId;
 
-    imageMsg.encoding = sensor_msgs::image_encodings::TYPE_8UC1;
+    imageMsg.encoding = sensor_msgs::image_encodings::MONO8;
     imageMsg.image = image;
 
     return imageMsg;
