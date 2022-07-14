@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: Point Cloud
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -138,6 +138,14 @@ Visualization Manager:
       Voxel Alpha: 1
       Voxel Coloring: Cell Color
       Voxel Rendering: Occupied Voxels
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /boundingBoxDynamicObjectClusters
+      Name: Dynamic Object Bounding Boxes
+      Namespaces:
+        octomap_based_object_tracking: true
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

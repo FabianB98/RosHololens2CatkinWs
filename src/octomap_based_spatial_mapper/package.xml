@@ -58,11 +58,13 @@
   <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
   <build_depend>tf</build_depend>
+  <build_depend>visualization_msgs</build_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
   <build_export_depend>hololens_depth_data_receiver_msgs</build_export_depend>
   <build_export_depend>libpcl_all</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>visualization_msgs</build_export_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>hololens_depth_data_receiver_msgs</exec_depend>
   <exec_depend>libpcl_all</exec_depend>
@@ -72,6 +74,7 @@
   <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

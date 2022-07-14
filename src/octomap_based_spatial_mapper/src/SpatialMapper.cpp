@@ -100,6 +100,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     octomapStaticObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_STATIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
+    boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -208,6 +209,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         dynamicObjectClusters = removeNoiseVoxelClusters(dynamicObjectClusters);
     }
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
+    std::vector<BoundingBox> boundingBoxes = calculateBoundingBoxes(dynamicObjectClusters);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -220,6 +222,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
+    publishBoundingBoxes(boundingBoxes, boundingBoxDynamicObjectClustersPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -821,6 +824,120 @@ octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(std::vector<std::v
     }
 
     return colorizedClusterOctree;
+}
+
+std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters)
+{
+    std::vector<BoundingBox> boundingBoxes;
+    const float halfLeafSize = leafSize / 2.0f;
+
+    for (auto clusterIt = clusters.begin(); clusterIt != clusters.end(); clusterIt++)
+    {
+        std::vector<octomap::point3d>& cluster = *clusterIt;
+
+        float minX = cluster[0].x();
+        float maxX = cluster[0].x();
+        float minY = cluster[0].y();
+        float maxY = cluster[0].y();
+        float minZ = cluster[0].z();
+        float maxZ = cluster[0].z();
+
+        for (int i = 1; i < cluster.size(); i++)
+        {
+            const float& x = cluster[i].x();
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+
+            const float& y = cluster[i].y();
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+
+            const float& z = cluster[i].z();
+            minZ = std::min(minZ, z);
+            maxZ = std::max(maxZ, z);
+        }
+
+        pcl::PointXYZ min = pcl::PointXYZ(minX - halfLeafSize, minY - halfLeafSize, minZ - halfLeafSize);
+        pcl::PointXYZ max = pcl::PointXYZ(maxX + halfLeafSize, maxY + halfLeafSize, maxZ + halfLeafSize);
+        boundingBoxes.push_back(BoundingBox(min, max));
+    }
+
+    return boundingBoxes;
+}
+
+void SpatialMapper::publishBoundingBoxes(
+        const std::vector<BoundingBox>& boundingBoxes,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp)
+{
+    if (boundingBoxes.size() == 0)
+        return;
+
+    visualization_msgs::MarkerArray markers;
+
+    for (int i = 0; i < boundingBoxes.size(); i++)
+    {
+        const BoundingBox& boundingBox = boundingBoxes[i];
+
+        // The following blocks of code used to generate the marker points are somewhat copied (and slightly modified)
+        // from object3d_detector (published in Yan2020online / https://github.com/yzrobot/online_learning)
+        visualization_msgs::Marker marker;
+        marker.header.seq = octomapSequenceNumber;
+        marker.header.stamp = timestamp;
+        marker.header.frame_id = "hololens_world";
+
+        marker.ns = "octomap_based_object_tracking";
+        marker.id = i;
+        marker.type = visualization_msgs::Marker::LINE_LIST;
+        marker.action = 0;
+
+        geometry_msgs::Point p[24];
+        p[0].x = boundingBox.max.x; p[0].y = boundingBox.max.y; p[0].z = boundingBox.max.z;
+        p[1].x = boundingBox.min.x; p[1].y = boundingBox.max.y; p[1].z = boundingBox.max.z;
+        p[2].x = boundingBox.max.x; p[2].y = boundingBox.max.y; p[2].z = boundingBox.max.z;
+        p[3].x = boundingBox.max.x; p[3].y = boundingBox.min.y; p[3].z = boundingBox.max.z;
+        p[4].x = boundingBox.max.x; p[4].y = boundingBox.max.y; p[4].z = boundingBox.max.z;
+        p[5].x = boundingBox.max.x; p[5].y = boundingBox.max.y; p[5].z = boundingBox.min.z;
+        p[6].x = boundingBox.min.x; p[6].y = boundingBox.min.y; p[6].z = boundingBox.min.z;
+        p[7].x = boundingBox.max.x; p[7].y = boundingBox.min.y; p[7].z = boundingBox.min.z;
+        p[8].x = boundingBox.min.x; p[8].y = boundingBox.min.y; p[8].z = boundingBox.min.z;
+        p[9].x = boundingBox.min.x; p[9].y = boundingBox.max.y; p[9].z = boundingBox.min.z;
+        p[10].x = boundingBox.min.x; p[10].y = boundingBox.min.y; p[10].z = boundingBox.min.z;
+        p[11].x = boundingBox.min.x; p[11].y = boundingBox.min.y; p[11].z = boundingBox.max.z;
+        p[12].x = boundingBox.min.x; p[12].y = boundingBox.max.y; p[12].z = boundingBox.max.z;
+        p[13].x = boundingBox.min.x; p[13].y = boundingBox.max.y; p[13].z = boundingBox.min.z;
+        p[14].x = boundingBox.min.x; p[14].y = boundingBox.max.y; p[14].z = boundingBox.max.z;
+        p[15].x = boundingBox.min.x; p[15].y = boundingBox.min.y; p[15].z = boundingBox.max.z;
+        p[16].x = boundingBox.max.x; p[16].y = boundingBox.min.y; p[16].z = boundingBox.max.z;
+        p[17].x = boundingBox.max.x; p[17].y = boundingBox.min.y; p[17].z = boundingBox.min.z;
+        p[18].x = boundingBox.max.x; p[18].y = boundingBox.min.y; p[18].z = boundingBox.max.z;
+        p[19].x = boundingBox.min.x; p[19].y = boundingBox.min.y; p[19].z = boundingBox.max.z;
+        p[20].x = boundingBox.max.x; p[20].y = boundingBox.max.y; p[20].z = boundingBox.min.z;
+        p[21].x = boundingBox.min.x; p[21].y = boundingBox.max.y; p[21].z = boundingBox.min.z;
+        p[22].x = boundingBox.max.x; p[22].y = boundingBox.max.y; p[22].z = boundingBox.min.z;
+        p[23].x = boundingBox.max.x; p[23].y = boundingBox.min.y; p[23].z = boundingBox.min.z;
+
+        for(int i = 0; i < 24; i++)
+            marker.points.push_back(p[i]);
+
+        int colorIndex = i % voxelClusterColors.size();
+        const octomap::ColorOcTreeNode::Color& clusterColor = voxelClusterColors[colorIndex];
+        marker.color.r = static_cast<float>(clusterColor.r) / 255.0;
+        marker.color.g = static_cast<float>(clusterColor.g) / 255.0;
+        marker.color.b = static_cast<float>(clusterColor.b) / 255.0;
+        marker.color.a = 1.0;
+
+        // Contrary to what one would assume, this does not scale the points along the x-axis. Instead, it defines the
+        // width to use when rendering the lines. A value of 0.02 therefore indicates that a line should have a width of
+        // 0.02 units.
+        marker.scale.x = 0.02;
+
+        marker.lifetime = ros::Duration(0.25);
+
+        markers.markers.push_back(marker);
+    }
+
+    publisher.publish(markers);
 }
 
 void SpatialMapper::setUpdateSpatialMap(bool _updateSpatialMap)

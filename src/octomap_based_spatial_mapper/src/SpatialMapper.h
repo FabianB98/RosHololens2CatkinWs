@@ -9,6 +9,8 @@
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
 #include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
+#include "visualization_msgs/Marker.h"
+#include "visualization_msgs/MarkerArray.h"
 
 #include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
@@ -25,7 +27,8 @@
 #include <pcl/filters/crop_box.h>
 #include <pcl_conversions/pcl_conversions.h>
 
-namespace std {
+namespace std
+{
     template <>
     struct hash<octomap::point3d>
     {
@@ -40,7 +43,8 @@ namespace std {
     };
 }
 
-enum VoxelDiffType {
+enum VoxelDiffType
+{
     FREE_FREE,
     FREE_OCCUPIED,
     OCCUPIED_FREE,
@@ -49,7 +53,8 @@ enum VoxelDiffType {
     UNKNOWN_OCCUPIED
 };
 
-struct VoxelDiffInfo {
+struct VoxelDiffInfo
+{
     octomap::point3d coordinates;
     VoxelDiffType type;
     octomap::OcTreeNode* nodeOldOctree;
@@ -70,7 +75,8 @@ struct VoxelDiffInfo {
     }
 };
 
-struct PossibleDynamicVoxelInfo {
+struct PossibleDynamicVoxelInfo
+{
     uint32_t freeCounter;
     uint32_t lastUpdate;
 
@@ -95,6 +101,24 @@ struct VoxelClassificationResult
     // static, but were now determined to be dynamic. All points in the spatial map point cloud which lie in any of
     // these voxels should be removed from the spatial map as we no longer consider them part of the static environment.
     std::vector<octomap::point3d> clearedVoxelCenterPoints;
+};
+
+struct BoundingBox
+{
+    pcl::PointXYZ min;
+    pcl::PointXYZ max;
+
+    BoundingBox(pcl::PointXYZ _min = pcl::PointXYZ(), pcl::PointXYZ _max = pcl::PointXYZ())
+    {
+        min = _min;
+        max = _max;
+    }
+
+    pcl::PointXYZ getCenter() const
+    {
+        pcl::PointXYZ center;
+        center.getArray3fMap() = (min.getArray3fMap() + max.getArray3fMap()) / 2.0f;
+    }
 };
 
 class SpatialMapper
@@ -161,6 +185,9 @@ private:
     // Creates a colorized octree where a voxels belonging to the same cluster will have the same color.
     octomap::ColorOcTree* createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters);
 
+    // Calculates the bounding box corresponding to each cluster.
+    std::vector<BoundingBox> calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters);
+
     // Extracts all the given point cloud's points which lie inside the voxels denoted by the given voxel center points.
     pcl::PointCloud<pcl::PointXYZ>::Ptr extractPointsCorrespondingToVoxels(
             pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
@@ -179,6 +206,11 @@ private:
 
         publisher.publish(octomapMsg);
     }
+
+    void publishBoundingBoxes(
+        const std::vector<BoundingBox>& boundingBoxes,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp);
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -234,6 +266,7 @@ private:
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;
     ros::Publisher octomapDynamicObjectClustersPublisher;
+    ros::Publisher boundingBoxDynamicObjectClustersPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

@@ -6,5 +6,7 @@
 #define OCTOMAP_DYNAMIC_OBJECTS_TOPIC "octomapDynamicObjects"
 #define OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC "octomapDynamicObjectClusters"
 
+#define BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC "boundingBoxDynamicObjectClusters"
+
 #define ENABLE_SPATIAL_MAP_UPDATES_TOPIC "enableSpatialMapUpdates"
 #define CLEAR_SPATIAL_MAP_TOPIC "clearSpatialMap"
