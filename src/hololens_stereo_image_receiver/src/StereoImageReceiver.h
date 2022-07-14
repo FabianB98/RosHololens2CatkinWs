@@ -82,6 +82,12 @@ private:
         const hololens_msgs::StereoCameraFrame::ConstPtr& stereoCamFrame);
 
     // Methods for publishing the results.
+    void publishCameraInfo(
+        sensor_msgs::CameraInfo& cameraInfo,
+        const ros::Publisher& publisher,
+        const std::string frameId,
+        uint32_t sequenceNumber,
+        const ros::Time& timestamp);
     sensor_msgs::Image imageToMsg(
         const Image image,
         const std::string frameId,

@@ -4,5 +4,6 @@
     <rosparam file="$(find hololens_stereo_image_receiver)/config/default_parameters.yaml" subst_value="true"/>
     <node name="stereo_image_receiver" pkg="hololens_stereo_image_receiver" type="stereo_image_receiver"/>
 
-    <node name="stereo_image_proc" pkg="stereo_image_proc" type="stereo_image_proc" ns="hololensStereoImage"/>
+    <!-- Uncomment the following line to also use stereo_image_proc for disparity map and point cloud calculation. -->
+    <!-- <node name="stereo_image_proc" pkg="stereo_image_proc" type="stereo_image_proc" ns="hololensStereoImage"/> -->
 </launch>
