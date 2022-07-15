@@ -1,4 +1,7 @@
+#pragma once
+
 #include <cmath>
+#include <math.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -8,6 +11,10 @@
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
+#include "geometry_msgs/Pose.h"
+#include "geometry_msgs/PoseArray.h"
+#include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/Quaternion.h"
 #include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 #include "visualization_msgs/Marker.h"
 #include "visualization_msgs/MarkerArray.h"
@@ -118,6 +125,7 @@ struct BoundingBox
     {
         pcl::PointXYZ center;
         center.getArray3fMap() = (min.getArray3fMap() + max.getArray3fMap()) / 2.0f;
+        return center;
     }
 };
 
@@ -188,10 +196,10 @@ private:
     // Calculates the bounding box corresponding to each cluster.
     std::vector<BoundingBox> calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters);
 
-    // Extracts all the given point cloud's points which lie inside the voxels denoted by the given voxel center points.
-    pcl::PointCloud<pcl::PointXYZ>::Ptr extractPointsCorrespondingToVoxels(
-            pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToFilter,
-            std::vector<octomap::point3d> voxelCenterPoints);
+    // Tracks the given bounding boxes over time.
+    std::map<long, std::vector<geometry_msgs::Pose>> trackBoundingBoxes(
+            std::vector<BoundingBox> boundingBoxes,
+            const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
@@ -207,10 +215,14 @@ private:
         publisher.publish(octomapMsg);
     }
 
+    // Publishes the given bounding boxes.
     void publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
+
+    // Publishes the tracking visualization of all tracks stored in previousPoses.
+    void publishTrackVisualization(ros::Publisher& publisher, const ros::Time& timestamp);
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -244,6 +256,18 @@ private:
     double noiseClusterRemovalNoStaticNeighborPercentage;
     std::vector<octomap::point3d> noiseClusterRemovalNeighborhood;
 
+    // Hyper parameters for tracking objects.
+    double trackingStdLimit;
+    double trackingConstantVelocityNoiseX;
+    double trackingConstantVelocityNoiseY;
+    double trackingConstantVelocityNoiseZ;
+    double trackingNoiseParamsX;
+    double trackingNoiseParamsY;
+    double trackingNoiseParamsZ;
+    int trackingSequenceSize;
+    double trackingSequenceTime;
+    std::string trackingDetectorName;
+
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
     bool updateSpatialMap = true;
@@ -258,6 +282,10 @@ private:
     // The currently estimated floor height.
     float floorHeight = 10000.0;
 
+    // Variables required for tracking objects.
+    std::unordered_map<long, std::vector<std::array<geometry_msgs::Pose, 3>>> objectTracks;
+    boost::mutex objectTracksMutex;
+
     // A transform listener used for accessing the position.
     tf::TransformListener tfListener;
 
@@ -267,6 +295,7 @@ private:
     ros::Publisher octomapDynamicObjectsPublisher;
     ros::Publisher octomapDynamicObjectClustersPublisher;
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
+    ros::Publisher trackedClustersVisualizationPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

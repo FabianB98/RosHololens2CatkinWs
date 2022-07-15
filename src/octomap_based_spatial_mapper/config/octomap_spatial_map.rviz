@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: Point Cloud
+    SyncSource: ""
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -143,7 +143,15 @@ Visualization Manager:
       Marker Topic: /boundingBoxDynamicObjectClusters
       Name: Dynamic Object Bounding Boxes
       Namespaces:
-        octomap_based_object_tracking: true
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /trackedClustersVisualization
+      Name: Tracked Trajectories
+      Namespaces:
+        {}
       Queue Size: 100
       Value: true
   Enabled: true

@@ -1,5 +1,11 @@
 #include "SpatialMapper.h"
 
+// I don't understand why I have to include this file in this cpp file, but as soon as I include it in the header file
+// instead, the linker throws errors about some functions in the jdpa namespace being defined multiple times... C++ is
+// weird sometimes... The other issue with this is that I can't declare the SimpleTracker as a member variable of
+// SpatialMapper which results in a non-optimal code design.
+#include "people_tracker/flobot_tracking.h"
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                  DEFAULT HYPER PARAMETERS FOR THE USED ALGORITHMS                                  //
@@ -33,11 +39,28 @@
 #define NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE 1.0    // The distance to neighboring voxels relative to leaf size.
 #define NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE 0.75   // How many voxels of the cluster must have a static neighbor.
 
+// Hyper parameters for tracking objects.
+#define TRACKING_STD_LIMIT 1.0                  // The upper limit for the std deviation of the estimated position.
+#define TRACKING_CONSTANT_VELOCITY_NOISE_X 1.4  // The noise along the X axis for the constant velocity prediction model.
+#define TRACKING_CONSTANT_VELOCITY_NOISE_Y 1.4  // The noise along the Y axis for the constant velocity prediction model.
+#define TRACKING_NOISE_PARAMS_X 0.1             // The noise along the X axis for the cartesian observation model.
+#define TRACKING_NOISE_PARAMS_Y 0.1             // The noise along the Y axis for the cartesian observation model.
+#define TRACKING_SEQUENCE_SIZE 4                // Minimum number of observations for new track creation.
+#define TRACKING_SEQUENCE_TIME 0.3              // Minimum interval between observations for new track creation.
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                              ACTUAL CODE STARTS HERE                                               //
 //                                                                                                                    //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+
+// Ugh... I really would have liked to declare this as a member variable of SpatialMapper, but as soon as I include the
+// required header in SpatialMapper.h, the linker throws errors about some functions in the jdpa namespace being defined
+// multiple times... The only workaround I can think of is to just declare it here, which is obviously bad from a
+// software design perspective. This workaround will also only work as long as there is at most one instance of a
+// SpatialMapper. Once there are multiple SpatialMapper instances, the current implementation may behave unexpected as
+// all SpatialMapper instances will access the same kalman filter (instead of each instance using its own filter).
+SimpleTracking<UKFilter>* trackingKalmanFilter = nullptr;
 
 SpatialMapper::SpatialMapper(ros::NodeHandle n)
 {
@@ -60,6 +83,13 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("noiseClusterRemovalRelativeNeighborDistance", noiseClusterRemovalRelativeNeighborDistance, NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE);
     n.param("noiseClusterRemovalStaticNeighborPercentage", noiseClusterRemovalStaticNeighborPercentage, NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE);
     noiseClusterRemovalNoStaticNeighborPercentage = 1.0 - noiseClusterRemovalStaticNeighborPercentage;
+    n.param("trackingStdLimit", trackingStdLimit, TRACKING_STD_LIMIT);
+    n.param("trackingConstantVelocityNoiseX", trackingConstantVelocityNoiseX, TRACKING_CONSTANT_VELOCITY_NOISE_X);
+    n.param("trackingConstantVelocityNoiseY", trackingConstantVelocityNoiseY, TRACKING_CONSTANT_VELOCITY_NOISE_Y);
+    n.param("trackingNoiseParamsX", trackingNoiseParamsX, TRACKING_NOISE_PARAMS_X);
+    n.param("trackingNoiseParamsY", trackingNoiseParamsY, TRACKING_NOISE_PARAMS_Y);
+    n.param("trackingSequenceSize", trackingSequenceSize, TRACKING_SEQUENCE_SIZE);
+    n.param("trackingSequenceTime", trackingSequenceTime, TRACKING_SEQUENCE_TIME);
 
     // Initialize the array of the neighborhoods to check when filtering voxels and when clustering voxels.
     octreeFilteringNeighborhood = initializeEuclideanDistanceNeighborhood(octreeFilteringRelativeNeighborDistance);
@@ -95,12 +125,23 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     // Initialize the global spatial map.
     staticObjectsOctree = new octomap::OcTree(leafSize);
 
+    // Initialize all variables required for tracking of objects.
+    trackingDetectorName = "octomap_based_spatial_mapper";
+    if (trackingKalmanFilter == nullptr)
+    {
+        trackingKalmanFilter = new SimpleTracking<UKFilter>(trackingStdLimit);
+        trackingKalmanFilter->createConstantVelocityModel(trackingConstantVelocityNoiseX, trackingConstantVelocityNoiseY);
+        trackingKalmanFilter->addDetectorModel(trackingDetectorName, NN, CARTESIAN, trackingNoiseParamsX, trackingNoiseParamsY,
+                trackingSequenceSize, trackingSequenceTime);
+    }
+
     // Advertise the topics to which the results will be published.
     octomapCurrentFramePublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_CURRENT_FRAME_TOPIC, 10);
     octomapStaticObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_STATIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
     boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
+    trackedClustersVisualizationPublisher = n.advertise<visualization_msgs::MarkerArray>(TRACKED_CLUSTERS_VISUALIZATION_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -209,7 +250,10 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         dynamicObjectClusters = removeNoiseVoxelClusters(dynamicObjectClusters);
     }
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
+    
+    // Track the center of each cluster's bounding box over time.
     std::vector<BoundingBox> boundingBoxes = calculateBoundingBoxes(dynamicObjectClusters);
+    std::map<long, std::vector<geometry_msgs::Pose>> trackedObjects = trackBoundingBoxes(boundingBoxes, msg);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -223,6 +267,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
     publishBoundingBoxes(boundingBoxes, boundingBoxDynamicObjectClustersPublisher, time);
+    publishTrackVisualization(trackedClustersVisualizationPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -236,15 +281,15 @@ octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
     // Create an Octomap point cloud containing all points. In a previous version all artificial endpoints were also
     // added to this point cloud. However, this brought up more issues than it helped solve (at least when using the
     // HoloLens 2), so it was decided that artificial endpoints are no longer added to this point cloud.
-    // One specific issue which arises when using artificial endpoints is caused by the fact that the depth sensor
-    // employed by the HoloLens 2 can't differentiate between points too far away from the sensor and points too close
-    // in front of the sensor. Due to this, the generated artificial endpoints would sometimes falsely indicate that
-    // there is more free space than there is in reality, which in term caused occupied voxels to be falsely removed
-    // from the spatial map of static objects.
-    // Furthermore, the HoloLens 2's depth sensor is unable to reliably measure depth values at sharp edges (e.g. at
-    // an edge between a wall and the floor) where it most of the time outputs depth values indicating that the object
-    // is either too close or too far away. These sensor values would then be mapped to an artificial endpoint which is
-    // further away than the actual point, so we would again falsely remove static voxels from the spatial map.
+    // One specific issue which arises when using artificial endpoints is caused by the fact that information about
+    // the reason why no depth value could be measured is stored in a separate buffer. However, if this buffer was also
+    // streamed from the HoloLens 2 to ROS, the streamed messages would be larger, so there would be more delay between
+    // the time when the depth images are taken and the time when they are processed. Additionally, if the network
+    // speed is slow, we might no longer be able to stream all depth frames. While not streaming this buffer has the
+    // benefit of keeping the message size smaller, it comes with the drawback that we always have to assume that all
+    // pixels for which no depth could be measured are too far away. Due to this, the generated artificial endpoints
+    // would sometimes falsely indicate that there is more free space than there is in reality, which in term caused
+    // occupied voxels to be falsely removed from the spatial map of static objects.
     octomap::Pointcloud pointcloudOctomap = octomap::Pointcloud();
     octomap::pointCloud2ToOctomap(msg->pointCloudWorldSpace, pointcloudOctomap);
 
@@ -865,6 +910,83 @@ std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(std::vector<std::
     return boundingBoxes;
 }
 
+std::map<long, std::vector<geometry_msgs::Pose>> SpatialMapper::trackBoundingBoxes(
+        std::vector<BoundingBox> boundingBoxes,
+        const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
+{
+    std::vector<geometry_msgs::Point> centerPointObservations;
+    for (int i = 0; i < boundingBoxes.size(); i++)
+    {
+        const BoundingBox& boundingBox = boundingBoxes[i];
+        pcl::PointXYZ center = boundingBox.getCenter();
+
+        // Z and Y axis are flipped because the kalman filter tracks objects in 2D on the the XY plane, but the Y axis
+        // points upwards in the HoloLens 2's world coordinate system. As we want to track objects on the XZ plane, we
+        // need to flip the Y and Z axis.
+        geometry_msgs::Point centerPoint;
+        centerPoint.x = center.x;
+        centerPoint.y = center.z;
+        centerPoint.z = center.y;
+        centerPointObservations.push_back(centerPoint);
+    }
+
+    double observationTime = msg->pointCloudWorldSpace.header.stamp.toSec();
+
+    // The code for the Kalman filter actually assumes that this is the robot's current pose, but as all bounding boxes
+    // are defined in the HoloLens 2's world coordinate system, we can just keep this pose set to the origin.
+    geometry_msgs::Pose originPose;
+    originPose.position.x = 0.0;
+    originPose.position.y = 0.0;
+    originPose.position.z = 0.0;
+    originPose.orientation.w = 1.0;
+    originPose.orientation.x = 0.0;
+    originPose.orientation.y = 0.0;
+    originPose.orientation.z = 0.0;
+
+    trackingKalmanFilter->addObservation(trackingDetectorName, centerPointObservations, observationTime, originPose);
+    std::map<long, std::vector<geometry_msgs::Pose>> trackedObjects = trackingKalmanFilter->track();
+
+    objectTracksMutex.lock();
+    std::unordered_set<long> trackedIds;
+    for (auto it = trackedObjects.begin(); it != trackedObjects.end(); ++it)
+    {
+        const long& id = it->first;
+        geometry_msgs::Pose& pose = it->second[0];
+        geometry_msgs::Pose& velocity = it->second[1];
+        geometry_msgs::Pose& variance = it->second[2];
+
+        // Flip Z and Y axis back to the HoloLens 2's world coordinate system.
+        pose.position.z = pose.position.y;
+        pose.position.y = -1.0;
+        pose.orientation.y = pose.orientation.z;
+        pose.orientation.z = 0.0;
+        velocity.position.z = velocity.position.y;
+        velocity.position.y = 0.0;
+        variance.position.z = variance.position.y;
+        variance.position.y = 0.0;
+        variance.orientation.z = variance.orientation.y;
+        variance.orientation.y = 0.0;
+
+        if (objectTracks.find(id) == objectTracks.end())
+            objectTracks.insert({id, std::vector<std::array<geometry_msgs::Pose, 3>>()});
+        
+        objectTracks[id].push_back(std::array<geometry_msgs::Pose, 3>{pose, velocity, variance});
+        trackedIds.insert(id);
+    }
+
+    // Clean up tracking information of IDs which are no longer being tracked.
+    for (auto it = objectTracks.begin(); it != objectTracks.end();)
+    {
+        if(trackedIds.find(it->first) == trackedIds.end())
+            it = objectTracks.erase(it);
+        else
+            it++;
+    }
+    objectTracksMutex.unlock();
+
+    return trackedObjects;
+}
+
 void SpatialMapper::publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
         ros::Publisher& publisher,
@@ -886,7 +1008,7 @@ void SpatialMapper::publishBoundingBoxes(
         marker.header.stamp = timestamp;
         marker.header.frame_id = "hololens_world";
 
-        marker.ns = "octomap_based_object_tracking";
+        marker.ns = "octomap_based_object_detection";
         marker.id = i;
         marker.type = visualization_msgs::Marker::LINE_LIST;
         marker.action = 0;
@@ -936,6 +1058,98 @@ void SpatialMapper::publishBoundingBoxes(
 
         markers.markers.push_back(marker);
     }
+
+    publisher.publish(markers);
+}
+
+void SpatialMapper::publishTrackVisualization(ros::Publisher& publisher, const ros::Time& timestamp)
+{
+    // The code of this method is somewhat copied from people_tracker.cpp found in bayes_people_tracker.
+
+    visualization_msgs::MarkerArray markers;
+
+    objectTracksMutex.lock();
+    if (objectTracks.size() == 0)
+    {
+        objectTracksMutex.unlock();
+        return;
+    }
+
+    for (auto it = objectTracks.begin(); it != objectTracks.end(); it++)
+    {
+        const long& id = it->first;
+        const std::vector<std::array<geometry_msgs::Pose, 3>>& track = it->second;
+        const geometry_msgs::Pose& lastPose = track[track.size() - 1][0];
+
+        // Add the marker displaying the ID of the tracked object.
+        visualization_msgs::Marker trackingIdMarker;
+        trackingIdMarker.header.seq = octomapSequenceNumber;
+        trackingIdMarker.header.stamp = timestamp;
+        trackingIdMarker.header.frame_id = "hololens_world";
+
+        trackingIdMarker.ns = "octomap_based_object_tracking_id";
+        trackingIdMarker.id = id;
+        trackingIdMarker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        trackingIdMarker.action = 0;
+
+        trackingIdMarker.pose.position.x = lastPose.position.x;
+        trackingIdMarker.pose.position.y = 1.0;
+        trackingIdMarker.pose.position.z = lastPose.position.z;
+
+        trackingIdMarker.color.r = 1.0;
+        trackingIdMarker.color.g = 0.2;
+        trackingIdMarker.color.b = 0.0;
+        trackingIdMarker.color.a = 1.0;
+
+        // Contrary to one would assume, this does not scale the text along the z-axis. Instead, it defines the font
+        // size to use when rendering the text.
+        trackingIdMarker.scale.z = 0.7;
+
+        trackingIdMarker.text = boost::to_string(id);
+        trackingIdMarker.lifetime = ros::Duration(1.0);
+
+        markers.markers.push_back(trackingIdMarker);
+
+        // Add the marker displaying the trajectory along which the tracked object has moved.
+        visualization_msgs::Marker trajectoryMarker;
+        trajectoryMarker.header.seq = octomapSequenceNumber;
+        trajectoryMarker.header.stamp = timestamp;
+        trajectoryMarker.header.frame_id = "hololens_world";
+
+        trajectoryMarker.ns = "octomap_based_object_tracking_trajectory";
+        trajectoryMarker.id = id;
+        trajectoryMarker.type = visualization_msgs::Marker::LINE_STRIP;
+        trajectoryMarker.action = 0;
+
+        for (int i = 0; i < track.size(); i++)
+        {
+            const geometry_msgs::Pose& pose = track[i][0];
+
+            geometry_msgs::Point point;
+            point.x = pose.position.x;
+            point.y = 1.0;
+            point.z = pose.position.z;
+
+            trajectoryMarker.points.push_back(point);
+        }
+
+        trajectoryMarker.color.r = std::max(0.3, (double)(id % 3) / 3.0);
+        trajectoryMarker.color.g = std::max(0.3, (double)(id % 3) / 6.0);
+        trajectoryMarker.color.b = std::max(0.3, (double)(id % 3) / 9.0);
+        trajectoryMarker.color.a = 1.0;
+
+        // Contrary to what one would assume, this does not scale the points along the x-axis. Instead, it defines the
+        // width to use when rendering the lines. A value of 0.1 therefore indicates that a line should have a width of
+        // 0.1 units.
+        trajectoryMarker.scale.x = 0.1;
+
+        trajectoryMarker.text = boost::to_string(id);
+        trajectoryMarker.lifetime = ros::Duration(1.0);
+
+        markers.markers.push_back(trajectoryMarker);
+    }
+
+    objectTracksMutex.unlock();
 
     publisher.publish(markers);
 }

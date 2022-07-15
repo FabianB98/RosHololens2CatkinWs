@@ -7,6 +7,7 @@
 #define OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC "octomapDynamicObjectClusters"
 
 #define BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC "boundingBoxDynamicObjectClusters"
+#define TRACKED_CLUSTERS_VISUALIZATION_TOPIC "trackedClustersVisualization"
 
 #define ENABLE_SPATIAL_MAP_UPDATES_TOPIC "enableSpatialMapUpdates"
 #define CLEAR_SPATIAL_MAP_TOPIC "clearSpatialMap"
