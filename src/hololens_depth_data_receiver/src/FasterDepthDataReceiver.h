@@ -33,6 +33,7 @@ private:
         const float maxDepth,
         const ros::Publisher& imagePublisher,
         const ros::Publisher& pointCloudWorldSpacePublisher,
+        const ros::Publisher& artificialEndpointsWorldSpacePublisher,
         const ros::Publisher& pointCloudFramePublisher,
         uint32_t* sequenceNumber);
 
@@ -42,7 +43,7 @@ private:
 
     // Reconstructs a point cloud from the data stored in the given depth map for all pixels which are part of any of
     // the given clusters.
-    pcl::PointCloud<pcl::PointXYZI>::Ptr createPointCloudFromClusters(
+    std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> createPointCloudFromClusters(
         const std::vector<std::vector<Pixel>>& depthClusters,
         DepthMap& depthMap,
         DepthMap& reflectivityImage,
@@ -103,6 +104,8 @@ private:
     ros::Publisher longThrowImagePublisher;
     ros::Publisher shortThrowPointCloudWorldSpacePublisher;
     ros::Publisher longThrowPointCloudWorldSpacePublisher;
+    ros::Publisher shortThrowArtificialEndpointsWorldSpacePublisher;
+    ros::Publisher longThrowArtificialEndpointsWorldSpacePublisher;
     ros::Publisher hololensPositionPublisher;
     ros::Publisher shortThrowPointCloudFramePublisher;
     ros::Publisher longThrowPointCloudFramePublisher;

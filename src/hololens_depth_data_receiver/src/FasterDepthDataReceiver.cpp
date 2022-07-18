@@ -125,6 +125,8 @@ FasterDepthDataReceiver::FasterDepthDataReceiver(ros::NodeHandle n)
     longThrowImagePublisher = n.advertise<sensor_msgs::Image>(LONG_THROW_IMAGE_TOPIC, 10);
     shortThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(SHORT_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC, 10);
     longThrowPointCloudWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(LONG_THROW_POINT_CLOUD_WORLD_SPACE_TOPIC, 10);
+    shortThrowArtificialEndpointsWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(SHORT_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE_TOPIC, 10);
+    longThrowArtificialEndpointsWorldSpacePublisher = n.advertise<sensor_msgs::PointCloud2>(LONG_THROW_ARTIFICIAL_ENDPOINTS_WORLD_SPACE_TOPIC, 10);
     hololensPositionPublisher = n.advertise<geometry_msgs::PointStamped>(HOLOLENS_POSITION_TOPIC, 10);
     shortThrowPointCloudFramePublisher = n.advertise<hololens_depth_data_receiver_msgs::PointCloudFrame>(SHORT_THROW_POINT_CLOUD_FRAME_TOPIC, 10);
     longThrowPointCloudFramePublisher = n.advertise<hololens_depth_data_receiver_msgs::PointCloudFrame>(LONG_THROW_POINT_CLOUD_FRAME_TOPIC, 10);
@@ -191,8 +193,8 @@ void FasterDepthDataReceiver::handleShortThrowDepthFrame(const hololens_msgs::De
     if (useShortThrow)
         handleDepthFrame(msg, shortThrowDirectionLookupTable, shortThrowMinDepth, shortThrowMinReliableDepth,
                 shortThrowMaxReliableDepth, shortThrowMaxDepth, shortThrowImagePublisher,
-                shortThrowPointCloudWorldSpacePublisher, shortThrowPointCloudFramePublisher,
-                &shortThrowSequenceNumber);
+                shortThrowPointCloudWorldSpacePublisher, shortThrowArtificialEndpointsWorldSpacePublisher,
+                shortThrowPointCloudFramePublisher, &shortThrowSequenceNumber);
 }
 
 void FasterDepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::DepthFrame::ConstPtr& msg)
@@ -200,8 +202,8 @@ void FasterDepthDataReceiver::handleLongThrowDepthFrame(const hololens_msgs::Dep
     if (useLongThrow)
         handleDepthFrame(msg, longThrowDirectionLookupTable, longThrowMinDepth, longThrowMinReliableDepth,
                 longThrowMaxReliableDepth, longThrowMaxDepth, longThrowImagePublisher,
-                longThrowPointCloudWorldSpacePublisher, longThrowPointCloudFramePublisher,
-                &longThrowSequenceNumber);
+                longThrowPointCloudWorldSpacePublisher, longThrowArtificialEndpointsWorldSpacePublisher,
+                longThrowPointCloudFramePublisher, &longThrowSequenceNumber);
 }
 
 void FasterDepthDataReceiver::handleShortThrowPixelDirections(const hololens_msgs::PixelDirections::ConstPtr& msg)
@@ -256,6 +258,7 @@ void FasterDepthDataReceiver::handleDepthFrame(
         const float maxDepth,
         const ros::Publisher& imagePublisher,
         const ros::Publisher& pointCloudWorldSpacePublisher,
+        const ros::Publisher& artificialEndpointsWorldSpacePublisher,
         const ros::Publisher& pointCloudFramePublisher,
         uint32_t* sequenceNumber)
 {
@@ -275,13 +278,18 @@ void FasterDepthDataReceiver::handleDepthFrame(
             : detectDepthClustersWithRegionGrowing(depthMap);
 
     // Reconstruct a point cloud from all pixels which were assigned to a cluster.
-    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace = createPointCloudFromClusters(depthClusters, depthMap,
-            reflectivityImage, pixelDirectionsLookupTable, minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> cloudsCamSpace
+            = createPointCloudFromClusters(depthClusters, depthMap, reflectivityImage, pixelDirectionsLookupTable,
+                    minDepth, minReliableDepth, maxReliableDepth, maxDepth);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace = cloudsCamSpace.first;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsCamSpace = cloudsCamSpace.second;
 
     // Calculate the transformation from camera space to world space and transform the point cloud.
     Eigen::Matrix4f camToWorld = computeCamToWorldFromDepthFrame(depthFrame);
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
+    pcl::transformPointCloud(*artificialEndpointsCamSpace, *artificialEndpointsWorldSpace, camToWorld);
 
     // Create a point cloud containing the artificial endpoints of all pixels in the depth map which are too far away
     // from the depth sensor.
@@ -296,7 +304,7 @@ void FasterDepthDataReceiver::handleDepthFrame(
     // The initialization of an empty point cloud and the conversion to a ROS message is only here for the purpose of
     // not crashing ROS nodes (i.e. the octomap based spatial mapper at the time of writing this comment) which listen
     // to published point cloud frame messages and try to access their artificial endpoints.
-    pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    // pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
 
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     ros::Time time = ros::Time::now();
@@ -310,6 +318,7 @@ void FasterDepthDataReceiver::handleDepthFrame(
     publishDepthImage(depthMap, depthClusters, pixelDirectionsLookupTable, imagePublisher, *sequenceNumber, time,
             minDepth, minReliableDepth, maxReliableDepth, maxDepth);
     pointCloudWorldSpacePublisher.publish(pointCloudWorldSpaceMsg);
+    artificialEndpointsWorldSpacePublisher.publish(artificialEndpointsWorldSpaceMsg);
     publishPointCloudFrame(pointCloudFramePublisher, pointCloudWorldSpaceMsg, artificialEndpointsWorldSpaceMsg,
             depthFrame, maxReliableDepth);
     sequenceNumber++;
@@ -474,7 +483,7 @@ std::vector<std::vector<Pixel>> FasterDepthDataReceiver::detectDepthClustersWith
     return result;
 }
 
-pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFromClusters(
+std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>::Ptr> FasterDepthDataReceiver::createPointCloudFromClusters(
         const std::vector<std::vector<Pixel>>& depthClusters,
         DepthMap& depthMap,
         DepthMap& reflectivityImage,
@@ -488,9 +497,13 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFr
     float activeBrightnessScalingFactor = 1.0 / pow(2.0, static_cast<float>((reflectivityImage.pixelStride - 1) * 8));
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsCamSpace (new pcl::PointCloud<pcl::PointXYZI>());
+
     for (auto clusterIt = depthClusters.begin(); clusterIt != depthClusters.end(); ++clusterIt)
     {
         pcl::PointCloud<pcl::PointXYZI>::Ptr clusterCloud (new pcl::PointCloud<pcl::PointXYZI>());
+        pcl::PointCloud<pcl::PointXYZI>::Ptr endpointsCloud (new pcl::PointCloud<pcl::PointXYZI>());
+
         for (auto pixelIt = clusterIt->begin(); pixelIt != clusterIt->end(); ++pixelIt)
         {
             // Get the depth at the current pixel.
@@ -498,8 +511,12 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFr
             float depth = static_cast<float>(pixelValue) / 1000.0f;
 
             // Skip pixels whose depth values are not within the reliable depth range.
-            if (depth < minReliableDepth || depth > maxReliableDepth)
+            if (depth < minReliableDepth)
                 continue;
+
+            bool isArtificialEndpoint = depth > maxReliableDepth;
+            if (isArtificialEndpoint)
+                depth = maxDepth;
             
             // Skip pixels for which we didn't receive any pixel direction. This should in theory only ever happen when
             // this depth data receiver is used with the HoloLens 1, which only captures depth data inside a circular
@@ -524,20 +541,24 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr FasterDepthDataReceiver::createPointCloudFr
             point.y = dir->direction.y * depth;
             point.z = dir->direction.z * depth;
             point.intensity = reflectivity;
-            clusterCloud->push_back(point);
+            if (isArtificialEndpoint)
+                endpointsCloud->push_back(point);
+            else
+                clusterCloud->push_back(point);
         }
 
         // Downsampling each cluster individually (instead of the whole point cloud containing all clusters) avoids
         // comparing points which are already known to be too far apart. This should in theory be a bit faster than
         // downsampling the complete point cloud at once.
-        pcl::PointCloud<pcl::PointXYZI>::Ptr clusterCloudDownsampled 
-                = downsamplePointCloud(clusterCloud, downsamplingLeafSize);
+        *pointCloudCamSpace += *downsamplePointCloud(clusterCloud, downsamplingLeafSize);
 
-        // Combine all clusters into a single point cloud.
-        *pointCloudCamSpace += *clusterCloudDownsampled;
+        // In theory, the artificial endpoints should be far enough away such that their point density should never too
+        // large, but they may also be downsampled just to be on the safe side.
+        if (endpointsCloud->points.size() > 0)
+            *artificialEndpointsCamSpace += *downsamplePointCloud(endpointsCloud, downsamplingLeafSize);
     }
 
-    return pointCloudCamSpace;
+    return std::make_pair(pointCloudCamSpace, artificialEndpointsCamSpace);
 }
 
 void FasterDepthDataReceiver::publishDepthImage(
@@ -587,12 +608,29 @@ void FasterDepthDataReceiver::publishDepthImage(
             uint32_t pixelValue = depthMap.valueAt(*pixelIt);
             float depth = static_cast<float>(pixelValue) / 1000.0f;
 
-            // Calculate the greyscale value which will be used for the pixel.
-            float greyscaleValue = 255.0f * depth / maxDepth;
+            if (depth < minDepth)
+            {
+                // Measured depth value is too close in front of the depth sensor.
+                image.data[index] = 0;
+                image.data[index + 1] = 0;
+                image.data[index + 2] = 0;
+            }
+            else if (depth > maxDepth)
+            {
+                // Measured depth value is too far away from the depth sensor.
+                image.data[index] = 255;
+                image.data[index + 1] = 255;
+                image.data[index + 2] = 255;
+            }
+            else
+            {
+                // Calculate the greyscale value which will be used for the pixel.
+                float greyscaleValue = 255.0f * depth / maxDepth;
 
-            image.data[index] = static_cast<uint8_t>(greyscaleValue * clusterColor[0]);
-            image.data[index + 1] = static_cast<uint8_t>(greyscaleValue * clusterColor[1]);
-            image.data[index + 2] = static_cast<uint8_t>(greyscaleValue * clusterColor[2]);
+                image.data[index] = static_cast<uint8_t>(greyscaleValue * clusterColor[0]);
+                image.data[index + 1] = static_cast<uint8_t>(greyscaleValue * clusterColor[1]);
+                image.data[index + 2] = static_cast<uint8_t>(greyscaleValue * clusterColor[2]);
+            }
         }
     }
 

@@ -37,7 +37,7 @@ outlierRemovalMinClusterSize: 500
 pixelClusteringUsePcl: true
 pixelClusteringNeighboringPixelDistance: 2.5
 pixelClusteringAbsoluteDepthValueSimilarity: 50 # A value of 50 indicates that neighboring pixels must have a depth value within a range of +/- 5 centimeters of the current pixel's depth value in order for them to be considered in the same cluster. 
-pixelClusteringMinClusterSize: 300
+pixelClusteringMinClusterSize: 100
 
 # Sensor intrinsics of the short throw depth sensor.
 shortThrowMinDepth: 0.1
