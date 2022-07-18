@@ -228,6 +228,7 @@ private:
     double leafSize;
     bool octreeInsertionLazyEval;
     bool octreeInsertionDiscretize;
+    bool octreeInsertionUseArtificialEndpoints;
 
     // Switches and hyper parameters for octree freespace filtering.
     bool doOctreeFreespaceFiltering;

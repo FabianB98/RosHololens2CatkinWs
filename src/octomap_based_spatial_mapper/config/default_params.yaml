@@ -6,6 +6,7 @@
 octomapLeafSize: 0.05
 octreeInsertionLazyEval: false
 octreeInsertionDiscretize: false
+octreeInsertionUseArtificialEndpoints: false
 
 # Switches and hyper parameters for octree freespace filtering.
 doOctreeFreespaceFiltering: true

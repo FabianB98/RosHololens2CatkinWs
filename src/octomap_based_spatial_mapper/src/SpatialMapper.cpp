@@ -13,9 +13,10 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 
 // Hyper parameters for insertion of point clouds into the octree data structure.
-#define LEAF_SIZE 0.05                      // The size of a voxel (in meters).
-#define OCTREE_INSERTION_LAZY_EVAL false    // Whether inner nodes are only updated after the point cloud was inserted.
-#define OCTREE_INSERTION_DISCRETIZE false   // Whether the point cloud is discretized into octree key cells.
+#define LEAF_SIZE 0.05                                  // The size of a voxel (in meters).
+#define OCTREE_INSERTION_LAZY_EVAL false                // Whether inner nodes are only updated after the point cloud was inserted.
+#define OCTREE_INSERTION_DISCRETIZE false               // Whether the point cloud is discretized into octree key cells.
+#define OCTREE_INSERTION_USE_ARTIFICIAL_ENDPOINTS false // Whether artificial endpoints should be used as information about free space.
 
 // Switches and hyper parameters for octree freespace filtering.
 #define DO_OCTREE_FREESPACE_FILTERING true              // Whether free voxels at the borders of octrees should be filtered.
@@ -70,6 +71,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("octomapLeafSize", leafSize, LEAF_SIZE);
     n.param("octreeInsertionLazyEval", octreeInsertionLazyEval, OCTREE_INSERTION_LAZY_EVAL);
     n.param("octreeInsertionDiscretize", octreeInsertionDiscretize, OCTREE_INSERTION_DISCRETIZE);
+    n.param("octreeInsertionUseArtificialEndpoints", octreeInsertionUseArtificialEndpoints, OCTREE_INSERTION_USE_ARTIFICIAL_ENDPOINTS);
     n.param("doOctreeFreespaceFiltering", doOctreeFreespaceFiltering, DO_OCTREE_FREESPACE_FILTERING);
     n.param("octreeFilteringRelativeNeighborDistance", octreeFilteringRelativeNeighborDistance, OCTREE_FILTERING_RELATIVE_NEIGHBOR_DISTANCE);
     n.param("numFreeObservationsBeforeVoxelRemoval", numFreeObservationsBeforeVoxelRemoval, NUM_FREE_OBSERVATIONS_BEFORE_VOXEL_REMOVAL);
@@ -278,18 +280,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
 octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
         const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
-    // Create an Octomap point cloud containing all points. In a previous version all artificial endpoints were also
-    // added to this point cloud. However, this brought up more issues than it helped solve (at least when using the
-    // HoloLens 2), so it was decided that artificial endpoints are no longer added to this point cloud.
-    // One specific issue which arises when using artificial endpoints is caused by the fact that information about
-    // the reason why no depth value could be measured is stored in a separate buffer. However, if this buffer was also
-    // streamed from the HoloLens 2 to ROS, the streamed messages would be larger, so there would be more delay between
-    // the time when the depth images are taken and the time when they are processed. Additionally, if the network
-    // speed is slow, we might no longer be able to stream all depth frames. While not streaming this buffer has the
-    // benefit of keeping the message size smaller, it comes with the drawback that we always have to assume that all
-    // pixels for which no depth could be measured are too far away. Due to this, the generated artificial endpoints
-    // would sometimes falsely indicate that there is more free space than there is in reality, which in term caused
-    // occupied voxels to be falsely removed from the spatial map of static objects.
+    // Create an Octomap point cloud containing all points.
     octomap::Pointcloud pointcloudOctomap = octomap::Pointcloud();
     octomap::pointCloud2ToOctomap(msg->pointCloudWorldSpace, pointcloudOctomap);
 
@@ -297,7 +288,32 @@ octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
     octomap::point3d sensorOrigin
         = octomap::point3d(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
     octomap::OcTree* octree = new octomap::OcTree(leafSize);
-    octree->insertPointCloud(pointcloudOctomap, sensorOrigin, msg->maxReliableDepth, octreeInsertionLazyEval, octreeInsertionDiscretize);
+    octree->insertPointCloud(pointcloudOctomap, sensorOrigin, msg->maxReliableDepth, octreeInsertionLazyEval,
+            octreeInsertionDiscretize);
+
+    // Use the artificial endpoints as additional information about free space, in case this is wanted.
+    // Please note that using artifical endpoints is not recommended for the HoloLens 2, as this will bring up more
+    // issues than it helps solve. While the depth sensor embedded into the HoloLens 2 distinguishes between a multiple
+    // reasons why a depth value is invalid (one of them being the measured object being too far away), it may sometimes
+    // fail to determine the correct invalidation reason, such that depth values may be declared as being too far away
+    // even though this is not the case in reality. Specifically, this may be the case when looking at a reflective
+    // surface (as for example a PC monitor or some metal object with a glossy surface) at a shallow angle while this
+    // surface is relatively close in front of the HoloLens. Another case in which the HoloLens's invalidation algorithm
+    // fails to correctly determine the invalidation reason happens when there is an object very close in front of the
+    // HoloLens (just a few centimeters away from the sensor). While this close object is correctly determined as being
+    // too close in front of the sensor, other objects which are further away from the HoloLens (but still within the
+    // depth range in which the HoloLens usually returns valid depth values) may be partially invalidated as being too
+    // far away. Due to these reasons, there may be more free space inserted than there is in reality, resulting in
+    // voxels being falsely removed from the spatial map of static objects.
+    if (octreeInsertionUseArtificialEndpoints)
+    {
+        octomap::Pointcloud artificialEndpointsOctomap = octomap::Pointcloud();
+        octomap::pointCloud2ToOctomap(msg->artificialEndpointsWorldSpace, artificialEndpointsOctomap);
+
+        octree->insertPointCloud(artificialEndpointsOctomap, sensorOrigin, msg->maxReliableDepth,
+                octreeInsertionLazyEval, octreeInsertionDiscretize);
+    }
+    
     if (octreeInsertionLazyEval)
     {
         octree->updateInnerOccupancy();

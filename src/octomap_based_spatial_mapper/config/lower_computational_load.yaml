@@ -9,6 +9,7 @@
 octomapLeafSize: 0.10           # Voxels now have an edge length of 10 cm instead of 5 cm.
 octreeInsertionLazyEval: true   # This should speed up conversion of point clouds to octrees.
 octreeInsertionDiscretize: true # This should speed up conversion of point clouds to octrees at the cost of producing slightly different results.
+octreeInsertionUseArtificialEndpoints: false
 
 # Switches and hyper parameters for octree freespace filtering.
 doOctreeFreespaceFiltering: true
