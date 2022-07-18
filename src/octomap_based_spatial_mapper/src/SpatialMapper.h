@@ -31,7 +31,10 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/common.h>
+#include <pcl/common/centroid.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 namespace std
@@ -196,10 +199,16 @@ private:
     // Calculates the bounding box corresponding to each cluster.
     std::vector<BoundingBox> calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters);
 
-    // Tracks the given bounding boxes over time.
-    std::map<long, std::vector<geometry_msgs::Pose>> trackBoundingBoxes(
-            std::vector<BoundingBox> boundingBoxes,
-            const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
+    // Extracts all points lying inside the given bounding boxes.
+    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> extractPointsCorrespondingToBoundingBoxes(
+        std::vector<BoundingBox> boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points);
+
+    // Calculates the centroid point of each of the given bounding boxes.
+    std::vector<pcl::PointXYZ> calculateCentroids(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds);
+
+    // Tracks the given points over time.
+    std::map<long, std::vector<geometry_msgs::Pose>> trackPoints(
+            std::vector<pcl::PointXYZ> pointsToTrack, ros::Time time);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>

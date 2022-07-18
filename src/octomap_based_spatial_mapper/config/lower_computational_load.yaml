@@ -16,8 +16,8 @@ doOctreeFreespaceFiltering: true
 octreeFilteringRelativeNeighborDistance: 1.25 # Check less neighbors during freespace filtering than the default configuration.
 
 # Hyper parameters for incorporating new octrees to the global spatial map.
-numFreeObservationsBeforeVoxelRemoval: 5
-numFramesBeforePossibleDynamicVoxelRemoval: 10
+numFreeObservationsBeforeVoxelRemoval: 10
+numFramesBeforePossibleDynamicVoxelRemoval: 15
 
 # Hyper parameters for floor removal in voxels of dynamic objects.
 doFloorRemovalInDynamicVoxels: true

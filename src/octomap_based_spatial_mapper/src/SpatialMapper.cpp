@@ -189,6 +189,9 @@ std::vector<octomap::point3d> SpatialMapper::initializeEuclideanDistanceNeighbor
 
 void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
 {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::fromROSMsg(msg->pointCloudWorldSpace, *pointCloud);
+
     octomap::OcTree* currentFrameOctree = pointCloudFrameToOctree(msg);
     currentFrameOctree->expand();
 
@@ -253,9 +256,13 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     }
     octomap::ColorOcTree* dynamicObjectClustersOctree = createVoxelClusterOctree(dynamicObjectClusters);
     
-    // Track the center of each cluster's bounding box over time.
+    // Track the centroid of each cluster's bounding box over time.
     std::vector<BoundingBox> boundingBoxes = calculateBoundingBoxes(dynamicObjectClusters);
-    std::map<long, std::vector<geometry_msgs::Pose>> trackedObjects = trackBoundingBoxes(boundingBoxes, msg);
+    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterPointClouds = extractPointsCorrespondingToBoundingBoxes(
+            boundingBoxes, pointCloud);
+    std::vector<pcl::PointXYZ> clusterCentroids = calculateCentroids(clusterPointClouds);
+    std::map<long, std::vector<geometry_msgs::Pose>> trackedObjects = trackPoints(clusterCentroids,
+            msg->pointCloudWorldSpace.header.stamp);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -926,27 +933,68 @@ std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(std::vector<std::
     return boundingBoxes;
 }
 
-std::map<long, std::vector<geometry_msgs::Pose>> SpatialMapper::trackBoundingBoxes(
-        std::vector<BoundingBox> boundingBoxes,
-        const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg)
+std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> SpatialMapper::extractPointsCorrespondingToBoundingBoxes(
+        std::vector<BoundingBox> boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points)
 {
-    std::vector<geometry_msgs::Point> centerPointObservations;
+    std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds;
+
     for (int i = 0; i < boundingBoxes.size(); i++)
     {
         const BoundingBox& boundingBox = boundingBoxes[i];
-        pcl::PointXYZ center = boundingBox.getCenter();
+
+        pcl::CropBox<pcl::PointXYZI> cropbox;
+        cropbox.setMin(Eigen::Vector4f(boundingBox.min.x, boundingBox.min.y, boundingBox.min.z, 1.0f));
+        cropbox.setMax(Eigen::Vector4f(boundingBox.max.x, boundingBox.max.y, boundingBox.max.z, 1.0f));
+        cropbox.setInputCloud(points);
+        
+        pcl::PointCloud<pcl::PointXYZI>::Ptr pointsInBoundingBox (new pcl::PointCloud<pcl::PointXYZI>());
+        cropbox.filter(*pointsInBoundingBox);
+        clusterClouds.push_back(pointsInBoundingBox);
+    }
+
+    return clusterClouds;
+}
+
+
+std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
+        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds)
+{
+    std::vector<pcl::PointXYZ> centroids;
+    
+    for (int i = 0; i < clusterClouds.size(); i++)
+    {
+        const pcl::PointCloud<pcl::PointXYZI>::Ptr& clusterCloud = clusterClouds[i];
+
+        Eigen::Vector4f centroidVec4f;
+        pcl::compute3DCentroid(*clusterCloud, centroidVec4f);
+
+        pcl::PointXYZ centroidPoint;
+        centroidPoint.getVector4fMap() = centroidVec4f;
+        centroids.push_back(centroidPoint);
+    }
+
+    return centroids;
+}
+
+std::map<long, std::vector<geometry_msgs::Pose>> SpatialMapper::trackPoints(
+            std::vector<pcl::PointXYZ> pointsToTrack, ros::Time time)
+{
+    std::vector<geometry_msgs::Point> pointObservations;
+    for (int i = 0; i < pointsToTrack.size(); i++)
+    {
+        const pcl::PointXYZ& pointToTrack = pointsToTrack[i];
 
         // Z and Y axis are flipped because the kalman filter tracks objects in 2D on the the XY plane, but the Y axis
         // points upwards in the HoloLens 2's world coordinate system. As we want to track objects on the XZ plane, we
         // need to flip the Y and Z axis.
-        geometry_msgs::Point centerPoint;
-        centerPoint.x = center.x;
-        centerPoint.y = center.z;
-        centerPoint.z = center.y;
-        centerPointObservations.push_back(centerPoint);
+        geometry_msgs::Point pointInOtherCoordinateSystem;
+        pointInOtherCoordinateSystem.x = pointToTrack.x;
+        pointInOtherCoordinateSystem.y = pointToTrack.z;
+        pointInOtherCoordinateSystem.z = pointToTrack.y;
+        pointObservations.push_back(pointInOtherCoordinateSystem);
     }
 
-    double observationTime = msg->pointCloudWorldSpace.header.stamp.toSec();
+    double observationTime = time.toSec();
 
     // The code for the Kalman filter actually assumes that this is the robot's current pose, but as all bounding boxes
     // are defined in the HoloLens 2's world coordinate system, we can just keep this pose set to the origin.
@@ -959,7 +1007,7 @@ std::map<long, std::vector<geometry_msgs::Pose>> SpatialMapper::trackBoundingBox
     originPose.orientation.y = 0.0;
     originPose.orientation.z = 0.0;
 
-    trackingKalmanFilter->addObservation(trackingDetectorName, centerPointObservations, observationTime, originPose);
+    trackingKalmanFilter->addObservation(trackingDetectorName, pointObservations, observationTime, originPose);
     std::map<long, std::vector<geometry_msgs::Pose>> trackedObjects = trackingKalmanFilter->track();
 
     objectTracksMutex.lock();
