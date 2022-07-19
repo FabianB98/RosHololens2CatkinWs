@@ -188,10 +188,18 @@ private:
     // Detects clusters in the given octree (must be expanded and may only contain occupied and unknown voxels).
     std::vector<std::vector<octomap::point3d>> detectVoxelClusters(octomap::OcTree* octreeToCluster);
 
+    // Removes clusters which contain too less voxels. These clusters contain either only sensor noise or some too small
+    // object, so they shouldn't be detected and tracked as a dynamic object.
+    std::vector<std::vector<octomap::point3d>> removeSmallVoxelClusters(
+            std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+
     // Removes clusters which were very likely detected due to sensor noise. These noisy clusters usually appear next
     // to static objects with most voxels being a neighbor to a static voxel, so they will be filtered out accordingly.
-    std::vector<std::vector<octomap::point3d>> removeNoiseVoxelClusters(
-            std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+    std::pair<std::vector<std::vector<octomap::point3d>>, std::vector<std::vector<octomap::point3d>>>
+            removeNoiseVoxelClusters(std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+    
+    // Adds the given voxel clusters to the spatial map of static objects.
+    void addClustersToStaticObjectsMap(std::vector<std::vector<octomap::point3d>> voxelClustersToAdd);
 
     // Creates a colorized octree where a voxels belonging to the same cluster will have the same color.
     octomap::ColorOcTree* createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters);
@@ -205,10 +213,6 @@ private:
 
     // Calculates the centroid point of each of the given bounding boxes.
     std::vector<pcl::PointXYZ> calculateCentroids(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds);
-
-    // Tracks the given points over time.
-    std::map<long, std::vector<geometry_msgs::Pose>> trackPoints(
-            std::vector<pcl::PointXYZ> pointsToTrack, ros::Time time);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
@@ -230,8 +234,11 @@ private:
         ros::Publisher& publisher,
         const ros::Time& timestamp);
 
-    // Publishes the tracking visualization of all tracks stored in previousPoses.
-    void publishTrackVisualization(ros::Publisher& publisher, const ros::Time& timestamp);
+    // Publishes the given centroids as a geometry_msgs::PoseArray.
+    void publishCentroids(
+        const std::vector<pcl::PointXYZ>& centroids,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp);
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -266,18 +273,6 @@ private:
     double noiseClusterRemovalNoStaticNeighborPercentage;
     std::vector<octomap::point3d> noiseClusterRemovalNeighborhood;
 
-    // Hyper parameters for tracking objects.
-    double trackingStdLimit;
-    double trackingConstantVelocityNoiseX;
-    double trackingConstantVelocityNoiseY;
-    double trackingConstantVelocityNoiseZ;
-    double trackingNoiseParamsX;
-    double trackingNoiseParamsY;
-    double trackingNoiseParamsZ;
-    int trackingSequenceSize;
-    double trackingSequenceTime;
-    std::string trackingDetectorName;
-
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
     bool updateSpatialMap = true;
@@ -292,10 +287,6 @@ private:
     // The currently estimated floor height.
     float floorHeight = 10000.0;
 
-    // Variables required for tracking objects.
-    std::unordered_map<long, std::vector<std::array<geometry_msgs::Pose, 3>>> objectTracks;
-    boost::mutex objectTracksMutex;
-
     // A transform listener used for accessing the position.
     tf::TransformListener tfListener;
 
@@ -305,7 +296,7 @@ private:
     ros::Publisher octomapDynamicObjectsPublisher;
     ros::Publisher octomapDynamicObjectClustersPublisher;
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
-    ros::Publisher trackedClustersVisualizationPublisher;
+    ros::Publisher dynamicClusterCentroidsPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

@@ -32,12 +32,3 @@ voxelClusteringMinClusterSize: 5  # With a leaf size of 10 cm each voxel holds a
 doNoiseClusterRemoval: true
 noiseClusterRemovalRelativeNeighborDistance: 1.0
 noiseClusterRemovalStaticNeighborPercentage: 0.75
-
-# Hyper parameters for tracking objects.
-trackingStdLimit: 1.0
-trackingConstantVelocityNoiseX: 1.4
-trackingConstantVelocityNoiseY: 1.4
-trackingNoiseParamsX: 0.1
-trackingNoiseParamsY: 0.1
-trackingSequenceSize: 4
-trackingSequenceTime: 0.3

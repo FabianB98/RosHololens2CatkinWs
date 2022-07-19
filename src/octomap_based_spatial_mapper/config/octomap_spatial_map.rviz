@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: Point Cloud
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -148,7 +148,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /trackedClustersVisualization
+      Marker Topic: /people_tracker/marker_array
       Name: Tracked Trajectories
       Namespaces:
         {}
@@ -194,10 +194,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.370398641
+      Pitch: 0.300398707
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.71859837
+      Yaw: 4.71359825
     Saved: ~
 Window Geometry:
   "&Displays":
