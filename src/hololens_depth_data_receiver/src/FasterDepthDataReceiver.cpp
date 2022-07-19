@@ -67,7 +67,8 @@
 #define PIXEL_CLUSTERING_MIN_CLUSTER_SIZE 400               // Clusters with less pixels than this value will be discarded.
 
 // Parameters for the voxel grid filter used for downsampling.
-#define DOWNSAMPLING_LEAF_SIZE 0.01f    // At most one point allowed in a voxel within this edge length.
+#define DOWNSAMPLING_LEAF_SIZE 0.01f        // At most one point allowed in a voxel within this edge length.
+#define DOWNSAMPLING_MIN_POINTS_PER_VOXEL 1 // At least this many points have to fall into the same voxel during downsampling.
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
@@ -119,6 +120,7 @@ FasterDepthDataReceiver::FasterDepthDataReceiver(ros::NodeHandle n)
 
     // Initialize all hyper parameters for downsampling as specified by parameters (or their default value).
     n.param("downsamplingLeafSize", downsamplingLeafSize, DOWNSAMPLING_LEAF_SIZE);
+    n.param("downsamplingMinPointsPerVoxel", downsamplingMinPointsPerVoxel, DOWNSAMPLING_MIN_POINTS_PER_VOXEL);
 
     // Advertise the topics to which the results will be published.
     shortThrowImagePublisher = n.advertise<sensor_msgs::Image>(SHORT_THROW_IMAGE_TOPIC, 10);
@@ -550,12 +552,13 @@ std::pair<pcl::PointCloud<pcl::PointXYZI>::Ptr, pcl::PointCloud<pcl::PointXYZI>:
         // Downsampling each cluster individually (instead of the whole point cloud containing all clusters) avoids
         // comparing points which are already known to be too far apart. This should in theory be a bit faster than
         // downsampling the complete point cloud at once.
-        *pointCloudCamSpace += *downsamplePointCloud(clusterCloud, downsamplingLeafSize);
+        *pointCloudCamSpace += *downsamplePointCloud(clusterCloud, downsamplingLeafSize, downsamplingMinPointsPerVoxel);
 
         // In theory, the artificial endpoints should be far enough away such that their point density should never too
         // large, but they may also be downsampled just to be on the safe side.
         if (endpointsCloud->points.size() > 0)
-            *artificialEndpointsCamSpace += *downsamplePointCloud(endpointsCloud, downsamplingLeafSize);
+            *artificialEndpointsCamSpace +=
+                    *downsamplePointCloud(endpointsCloud, downsamplingLeafSize, downsamplingMinPointsPerVoxel);
     }
 
     return std::make_pair(pointCloudCamSpace, artificialEndpointsCamSpace);

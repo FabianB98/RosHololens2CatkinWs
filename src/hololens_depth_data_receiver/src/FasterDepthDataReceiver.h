@@ -94,6 +94,7 @@ private:
 
     // Hyper parameters used for downsampling.
     float downsamplingLeafSize;
+    int downsamplingMinPointsPerVoxel;
 
     // The directions (in camera space) in which each pixel of the depth frames points at.
     std::vector<std::vector<hololens_msgs::PixelDirection::Ptr>> shortThrowDirectionLookupTable;

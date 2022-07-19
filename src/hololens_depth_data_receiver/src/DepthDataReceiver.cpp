@@ -53,7 +53,7 @@ Eigen::Matrix4f DepthDataReceiver::computeCamToWorldFromDepthFrame(
 // just have to resort to duplicating these functions...
 pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::downsamplePointCloud(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
-    const float leafSize)
+    const float leafSize, const int minPointsPerVoxel)
 {
     // Create a point cloud in which we will store the results.
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudDownsampled (new pcl::PointCloud<pcl::PointXYZ>());
@@ -62,6 +62,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::downsamplePointCloud(
     pcl::VoxelGrid<pcl::PointXYZ> voxelGrid;
     voxelGrid.setInputCloud(pointCloudToDownsample);
     voxelGrid.setLeafSize(leafSize, leafSize, leafSize);
+    voxelGrid.setMinimumPointsNumberPerVoxel(minPointsPerVoxel);
     voxelGrid.filter(*pointCloudDownsampled);
 
     // Return the downsampled point cloud.
@@ -70,7 +71,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthDataReceiver::downsamplePointCloud(
 
 pcl::PointCloud<pcl::PointXYZI>::Ptr DepthDataReceiver::downsamplePointCloud(
     const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
-    const float leafSize)
+    const float leafSize, const int minPointsPerVoxel)
 {
     // Create a point cloud in which we will store the results.
     pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudDownsampled (new pcl::PointCloud<pcl::PointXYZI>());
@@ -79,6 +80,7 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr DepthDataReceiver::downsamplePointCloud(
     pcl::VoxelGrid<pcl::PointXYZI> voxelGrid;
     voxelGrid.setInputCloud(pointCloudToDownsample);
     voxelGrid.setLeafSize(leafSize, leafSize, leafSize);
+    voxelGrid.setMinimumPointsNumberPerVoxel(minPointsPerVoxel);
     voxelGrid.filter(*pointCloudDownsampled);
 
     // Return the downsampled point cloud.

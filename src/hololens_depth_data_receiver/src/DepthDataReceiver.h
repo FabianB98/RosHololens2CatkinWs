@@ -62,10 +62,10 @@ protected:
     // them, so I'll just have to resort to duplicating these functions...
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsamplePointCloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloudToDownsample,
-        const float leafSize);
+        const float leafSize, const int minPointsPerVoxel = 1);
     pcl::PointCloud<pcl::PointXYZI>::Ptr downsamplePointCloud(
         const pcl::PointCloud<pcl::PointXYZI>::Ptr pointCloudToDownsample,
-        const float leafSize);
+        const float leafSize, const int minPointsPerVoxel = 1);
     
     // Removes outliers from a given point cloud with a radius outlier removal filter.
     pcl::PointCloud<pcl::PointXYZ>::Ptr removeOutliersRadius(

@@ -9,6 +9,7 @@ useLongThrow: true
 # Hyper parameters used for downsampling.
 doDownsampling: true
 downsamplingLeafSize: 0.01
+downsamplingMinPointsPerVoxel: 1 # Currently, this only affects the FasterDepthDataReceiver. This parameter was just meant to test something real quick, but changing it to a larger value than 1 didn't result in the desired effects.
 
 # Hyper parameters used for outlier removal with a radius outlier removal filer.
 doOutlierRemovalRadius: true
