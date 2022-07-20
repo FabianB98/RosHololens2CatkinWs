@@ -86,7 +86,7 @@ public:
   
   void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position);
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid);
+		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position);
   void saveFeature(Feature &f, struct svm_node *x);
   void classify();
 };
@@ -167,15 +167,16 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc_hololens(new pcl::PointCloud<pcl::PointXYZI>);
   pcl::fromROSMsg(msg->pointCloudWorldSpace, *pcl_pc_hololens);
 
-  pcl::PointXYZ sensor_position
-      = pcl::PointXYZ(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
-
   // The HoloLens uses a slightly different coordinate system. Up corresponds to the y-axis instead of the z-axis.
   // We need to transform the point cloud accordingly such that the coordinate systems match up.
   Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
   hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
+
+  // The same applies to the sensor position which also needs to be rotated accordingly.
+  pcl::PointXYZ sensor_position
+      = pcl::PointXYZ(msg->hololensPosition.point.x, -msg->hololensPosition.point.z, msg->hololensPosition.point.y);
 
   if (SAVE_POINT_CLOUDS_TO_DISK && pcl_pc->size() > 0) {
     std::string home = std::string(getenv("HOME"));
@@ -339,7 +340,7 @@ void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, p
           continue;
 	
         Feature f;
-        extractFeature(cluster, f, min, max, centroid);
+        extractFeature(cluster, f, min, max, centroid, sensor_position);
         features_.push_back(f);
       }
     }
@@ -508,7 +509,7 @@ void computeIntensity(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int bins, float *
 }
 
 void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid) {
+				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position) {
   f.centroid = centroid;
   f.min = min;
   f.max = max;
@@ -520,7 +521,13 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
     f.min_distance = FLT_MAX;
     float d2; //squared Euclidean distance
     for(int i = 0; i < pc->size(); i++) {
-      d2 = pc->points[i].x*pc->points[i].x + pc->points[i].y*pc->points[i].y + pc->points[i].z*pc->points[i].z;
+      const pcl::PointXYZI& point = pc->points[i];
+      pcl::PointXYZ diff_to_sensor_position;
+      diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
+      d2 = diff_to_sensor_position.x * diff_to_sensor_position.x + 
+          diff_to_sensor_position.y * diff_to_sensor_position.y + 
+          diff_to_sensor_position.z * diff_to_sensor_position.z;
+
       if(f.min_distance > d2)
 	      f.min_distance = d2;
     }

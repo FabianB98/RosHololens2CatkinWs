@@ -93,6 +93,7 @@ private:
   int negative_;
   uint32_t learnable_cluster_id_;
   std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr, Eigen::aligned_allocator<pcl::PointCloud<pcl::PointXYZI>::Ptr > > learnable_clusters_;
+  std::vector<pcl::PointXYZ> sensor_positions_;
   std::vector<double> clusters_probability_;
   bool find_the_best_training_parameters_;
   
@@ -104,7 +105,7 @@ public:
   void trajectoryCallback(const geometry_msgs::PoseArray::ConstPtr& trajectory);
 
   void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position);
-  void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f);
+  void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f, pcl::PointXYZ sensor_position);
   void saveFeature(Feature &f, struct svm_node *x);
   void classify();
   void train();
@@ -224,7 +225,7 @@ void Object3dDetector::trajectoryCallback(const geometry_msgs::PoseArray::ConstP
       for(int j = 0; j < learnable_clusters_.size(); j++) {
         if((uint32_t)trajectory->poses[i].position.z == learnable_clusters_[j]->header.seq) {
           Feature f;
-          extractFeature(learnable_clusters_[j], f);
+          extractFeature(learnable_clusters_[j], f, sensor_positions_[j]);
           saveFeature(f, svm_problem_.x[svm_problem_.l]);
           if(trajectory->header.frame_id == "human_trajectory" && positive_ < max_positives_) {
             svm_problem_.y[svm_problem_.l++] = 1; // 1, the positive label
@@ -258,15 +259,16 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc_hololens(new pcl::PointCloud<pcl::PointXYZI>);
   pcl::fromROSMsg(msg->pointCloudWorldSpace, *pcl_pc_hololens);
 
-  pcl::PointXYZ sensor_position
-      = pcl::PointXYZ(msg->hololensPosition.point.x, msg->hololensPosition.point.y, msg->hololensPosition.point.z);
-
   // The HoloLens uses a slightly different coordinate system. Up corresponds to the y-axis instead of the z-axis.
   // We need to transform the point cloud accordingly such that the coordinate systems match up.
   Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
   hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
   pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
+
+  // The same applies to the sensor position which also needs to be rotated accordingly.
+  pcl::PointXYZ sensor_position
+      = pcl::PointXYZ(msg->hololensPosition.point.x, -msg->hololensPosition.point.z, msg->hololensPosition.point.y);
   
   extractCluster(pcl_pc, sensor_position);
   classify();
@@ -425,14 +427,15 @@ void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, p
           max[2]-min[2] >= vfilter_min_z_ && max[2]-min[2] <= vfilter_max_z_ &&
           min[2] <= cluster_min_z_) {
           Feature f;
-          extractFeature(cluster, f);
+          extractFeature(cluster, f, sensor_position);
           features_.push_back(f);
           cluster->header.seq = learnable_cluster_id_++;
           learnable_clusters_.push_back(cluster);
+          sensor_positions_.push_back(sensor_position);
         } else {
           if(positive_ == max_positives_ && negative_ < max_negatives_) { // @todo condition test only, to be removed
             Feature f;
-            extractFeature(cluster, f);
+            extractFeature(cluster, f, sensor_position);
             saveFeature(f, svm_problem_.x[svm_problem_.l]);
             svm_problem_.y[svm_problem_.l++] = -1; // -1, the negative label
             ++negative_;
@@ -604,7 +607,7 @@ void computeIntensity(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int bins, float *
   intensity[26] = mean;
 }
 
-void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f) {
+void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f, pcl::PointXYZ sensor_position) {
   Eigen::Vector4f centroid, min, max;
   pcl::compute3DCentroid(*pc, centroid);
   pcl::getMinMax3D(*pc, min, max);
@@ -619,7 +622,13 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
   f.min_distance = FLT_MAX;
   float d2; //squared Euclidean distance
   for(int i = 0; i < pc->size(); i++) {
-    d2 = pc->points[i].x*pc->points[i].x + pc->points[i].y*pc->points[i].y + pc->points[i].z*pc->points[i].z;
+    const pcl::PointXYZI& point = pc->points[i];
+    pcl::PointXYZ diff_to_sensor_position;
+    diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
+    d2 = diff_to_sensor_position.x * diff_to_sensor_position.x + 
+        diff_to_sensor_position.y * diff_to_sensor_position.y + 
+        diff_to_sensor_position.z * diff_to_sensor_position.z;
+
     if(f.min_distance > d2)
       f.min_distance = d2;
   }
@@ -915,6 +924,7 @@ void Object3dDetector::train() {
     negative_ = 0;
   }
   learnable_clusters_.clear();
+  sensor_positions_.clear();
   clusters_probability_.clear();
   
   /*** debug saving ***/
