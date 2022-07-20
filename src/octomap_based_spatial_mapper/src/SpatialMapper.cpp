@@ -93,9 +93,34 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
                 octomap::ColorOcTreeNode::Color(128, 0, 128),
                 octomap::ColorOcTreeNode::Color(128, 128, 128)
             };
+    
+    // Define the colors to use for visualizing the detected object class.
+    std_msgs::ColorRGBA humanColor;
+    humanColor.r = 0.0;
+    humanColor.g = 1.0;
+    humanColor.b = 0.5;
+    humanColor.a = 1.0;
+    objectClassColors[ClusterClassificationResult::HUMAN] = humanColor;
+
+    std_msgs::ColorRGBA unknownColor;
+    unknownColor.r = 0.5;
+    unknownColor.g = 0.5;
+    unknownColor.b = 0.5;
+    unknownColor.a = 1.0;
+    objectClassColors[ClusterClassificationResult::UNKNOWN] = unknownColor;
+
+    std_msgs::ColorRGBA classificationFailedColor;
+    classificationFailedColor.r = 0.0;
+    classificationFailedColor.g = 0.0;
+    classificationFailedColor.b = 0.0;
+    classificationFailedColor.a = 1.0;
+    objectClassColors[ClusterClassificationResult::CLASSIFICATION_FAILED] = classificationFailedColor;
 
     // Initialize the global spatial map.
     staticObjectsOctree = new octomap::OcTree(leafSize);
+
+    // Register the service clients for all services which will be called.
+    humanClassifierService = n.serviceClient<object3d_detector::ClassifyClusters>(HUMAN_CLASSIFICATION_SERVICE_NAME);
 
     // Advertise the topics to which the results will be published.
     octomapCurrentFramePublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_CURRENT_FRAME_TOPIC, 10);
@@ -232,6 +257,8 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterPointClouds = extractPointsCorrespondingToBoundingBoxes(
             boundingBoxes, pointCloud);
     std::vector<pcl::PointXYZ> clusterCentroids = calculateCentroids(clusterPointClouds);
+    std::vector<ClusterClassificationResult> clusterClasses = classifyVoxelClusters(clusterPointClouds,
+            msg->hololensPosition.point);
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -244,7 +271,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
-    publishBoundingBoxes(boundingBoxes, boundingBoxDynamicObjectClustersPublisher, time);
+    publishBoundingBoxes(boundingBoxes, clusterClasses, boundingBoxDynamicObjectClustersPublisher, time);
     publishCentroids(clusterCentroids, dynamicClusterCentroidsPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
@@ -981,8 +1008,47 @@ std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
     return centroids;
 }
 
+std::vector<ClusterClassificationResult> SpatialMapper::classifyVoxelClusters(
+        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition)
+{
+    std::vector<ClusterClassificationResult> clusterClasses;
+
+    if (clusterClouds.size() == 0)
+        return clusterClasses;
+
+    object3d_detector::ClassifyClusters humanClassificationMsg;
+    for (auto& clusterCloud : clusterClouds)
+    {
+        sensor_msgs::PointCloud2 clusterCloudMsg;
+        pcl::toROSMsg(*clusterCloud, clusterCloudMsg);
+        humanClassificationMsg.request.clusters.push_back(clusterCloudMsg);
+    }
+    humanClassificationMsg.request.sensorPosition = sensorPosition;
+
+    bool humanClassificationSuccess = humanClassifierService.call(humanClassificationMsg);
+
+    if (humanClassificationSuccess)
+    {
+        for (size_t i = 0; i < clusterClouds.size(); i++)
+        {
+            const bool& human = humanClassificationMsg.response.classificationResults[i];
+            clusterClasses.push_back(human ? ClusterClassificationResult::HUMAN : ClusterClassificationResult::UNKNOWN);
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < clusterClouds.size(); i++)
+        {
+            clusterClasses.push_back(ClusterClassificationResult::CLASSIFICATION_FAILED);
+        }
+    }
+
+    return clusterClasses;
+}
+
 void SpatialMapper::publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<ClusterClassificationResult>& clusterClasses,
         ros::Publisher& publisher,
         const ros::Time& timestamp)
 {
@@ -1036,12 +1102,7 @@ void SpatialMapper::publishBoundingBoxes(
         for(int i = 0; i < 24; i++)
             marker.points.push_back(p[i]);
 
-        int colorIndex = i % voxelClusterColors.size();
-        const octomap::ColorOcTreeNode::Color& clusterColor = voxelClusterColors[colorIndex];
-        marker.color.r = static_cast<float>(clusterColor.r) / 255.0;
-        marker.color.g = static_cast<float>(clusterColor.g) / 255.0;
-        marker.color.b = static_cast<float>(clusterColor.b) / 255.0;
-        marker.color.a = 1.0;
+        marker.color = objectClassColors[clusterClasses[i]];
 
         // Contrary to what one would assume, this does not scale the points along the x-axis. Instead, it defines the
         // width to use when rendering the lines. A value of 0.02 therefore indicates that a line should have a width of

@@ -59,6 +59,7 @@
   <build_depend>std_msgs</build_depend>
   <build_depend>tf</build_depend>
   <build_depend>visualization_msgs</build_depend>
+  <build_depend>object3d_detector</build_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
   <build_export_depend>hololens_depth_data_receiver_msgs</build_export_depend>
   <build_export_depend>libpcl_all</build_export_depend>
@@ -76,6 +77,7 @@
   <exec_depend>tf</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>bayes_people_tracker</exec_depend>
+  <exec_depend>object3d_detector</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

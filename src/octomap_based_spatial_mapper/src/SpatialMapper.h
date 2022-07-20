@@ -9,6 +9,7 @@
 #include "Topics.h"
 
 #include "ros/ros.h"
+#include "std_msgs/ColorRGBA.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "geometry_msgs/Point.h"
 #include "geometry_msgs/Pose.h"
@@ -16,6 +17,7 @@
 #include "geometry_msgs/PoseStamped.h"
 #include "geometry_msgs/Quaternion.h"
 #include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
+#include "object3d_detector/ClassifyClusters.h"
 #include "visualization_msgs/Marker.h"
 #include "visualization_msgs/MarkerArray.h"
 
@@ -36,22 +38,6 @@
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl_conversions/pcl_conversions.h>
-
-namespace std
-{
-    template <>
-    struct hash<octomap::point3d>
-    {
-        std::size_t operator()(const octomap::point3d& point) const
-        {
-            std::size_t res = 17;
-            res = res * 31 + hash<float>()(point.x());
-            res = res * 31 + hash<float>()(point.y());
-            res = res * 31 + hash<float>()(point.z());
-            return res;
-        }
-    };
-}
 
 enum VoxelDiffType
 {
@@ -131,6 +117,38 @@ struct BoundingBox
         return center;
     }
 };
+
+enum ClusterClassificationResult
+{
+    HUMAN,
+    UNKNOWN,
+    CLASSIFICATION_FAILED
+};
+
+namespace std
+{
+    template <>
+    struct hash<octomap::point3d>
+    {
+        std::size_t operator()(const octomap::point3d& point) const
+        {
+            std::size_t res = 17;
+            res = res * 31 + hash<float>()(point.x());
+            res = res * 31 + hash<float>()(point.y());
+            res = res * 31 + hash<float>()(point.z());
+            return res;
+        }
+    };
+
+    template <>
+    struct hash<ClusterClassificationResult>
+    {
+        std::size_t operator()(const ClusterClassificationResult& classificationResult) const
+        {
+            return static_cast<std::size_t>(classificationResult);
+        }
+    };
+}
 
 class SpatialMapper
 {
@@ -214,6 +232,10 @@ private:
     // Calculates the centroid point of each of the given bounding boxes.
     std::vector<pcl::PointXYZ> calculateCentroids(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds);
 
+    // Classifies each of the given voxel clusters.
+    std::vector<ClusterClassificationResult> classifyVoxelClusters(
+        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition);
+
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
     void publishOctree(const OctomapT* octree, ros::Publisher& publisher, const ros::Time& timestamp)
@@ -231,6 +253,7 @@ private:
     // Publishes the given bounding boxes.
     void publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<ClusterClassificationResult>& clusterClasses,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
 
@@ -287,10 +310,11 @@ private:
     // The currently estimated floor height.
     float floorHeight = 10000.0;
 
-    // A transform listener used for accessing the position.
-    tf::TransformListener tfListener;
+    // A map of the colors to assign to the detected object classes.
+    std::unordered_map<ClusterClassificationResult, std_msgs::ColorRGBA> objectClassColors;
 
-    // ROS publishers.
+    // ROS publishers and service clients.
+    ros::ServiceClient humanClassifierService;
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;
