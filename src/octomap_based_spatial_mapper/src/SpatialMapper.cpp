@@ -100,21 +100,21 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     humanColor.g = 1.0;
     humanColor.b = 0.5;
     humanColor.a = 1.0;
-    objectClassColors[ClusterClassificationResult::HUMAN] = humanColor;
+    objectClassColors[ClusterClass::HUMAN] = humanColor;
 
     std_msgs::ColorRGBA unknownColor;
     unknownColor.r = 0.5;
     unknownColor.g = 0.5;
     unknownColor.b = 0.5;
     unknownColor.a = 1.0;
-    objectClassColors[ClusterClassificationResult::UNKNOWN] = unknownColor;
+    objectClassColors[ClusterClass::UNKNOWN] = unknownColor;
 
     std_msgs::ColorRGBA classificationFailedColor;
     classificationFailedColor.r = 0.0;
     classificationFailedColor.g = 0.0;
     classificationFailedColor.b = 0.0;
     classificationFailedColor.a = 1.0;
-    objectClassColors[ClusterClassificationResult::CLASSIFICATION_FAILED] = classificationFailedColor;
+    objectClassColors[ClusterClass::CLASSIFICATION_FAILED] = classificationFailedColor;
 
     // Initialize the global spatial map.
     staticObjectsOctree = new octomap::OcTree(leafSize);
@@ -128,7 +128,9 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
     boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
-    dynamicClusterCentroidsPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_TOPIC, 10);
+    dynamicClusterCentroidsAllPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC, 10);
+    dynamicClusterCentroidsHumanPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC, 10);
+    dynamicClusterCentroidsUnknownPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -257,8 +259,13 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterPointClouds = extractPointsCorrespondingToBoundingBoxes(
             boundingBoxes, pointCloud);
     std::vector<pcl::PointXYZ> clusterCentroids = calculateCentroids(clusterPointClouds);
-    std::vector<ClusterClassificationResult> clusterClasses = classifyVoxelClusters(clusterPointClouds,
+
+    // Classify each cluster.
+    std::vector<ClusterClass> clusterClasses = classifyVoxelClusters(clusterPointClouds,
             msg->hololensPosition.point);
+    std::vector<size_t> clusterIndicesHuman = selectClustersByClass(clusterClasses, {ClusterClass::HUMAN});
+    std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(clusterClasses,
+            {ClusterClass::UNKNOWN, ClusterClass::CLASSIFICATION_FAILED});
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -272,7 +279,9 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
     publishBoundingBoxes(boundingBoxes, clusterClasses, boundingBoxDynamicObjectClustersPublisher, time);
-    publishCentroids(clusterCentroids, dynamicClusterCentroidsPublisher, time);
+    publishCentroids(clusterCentroids, dynamicClusterCentroidsAllPublisher, time);
+    publishCentroids(clusterCentroids, clusterIndicesHuman, dynamicClusterCentroidsHumanPublisher, time);
+    publishCentroids(clusterCentroids, clusterIndicesUnknown, dynamicClusterCentroidsUnknownPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -1008,10 +1017,10 @@ std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
     return centroids;
 }
 
-std::vector<ClusterClassificationResult> SpatialMapper::classifyVoxelClusters(
+std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
         std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition)
 {
-    std::vector<ClusterClassificationResult> clusterClasses;
+    std::vector<ClusterClass> clusterClasses;
 
     if (clusterClouds.size() == 0)
         return clusterClasses;
@@ -1032,23 +1041,41 @@ std::vector<ClusterClassificationResult> SpatialMapper::classifyVoxelClusters(
         for (size_t i = 0; i < clusterClouds.size(); i++)
         {
             const bool& human = humanClassificationMsg.response.classificationResults[i];
-            clusterClasses.push_back(human ? ClusterClassificationResult::HUMAN : ClusterClassificationResult::UNKNOWN);
+            clusterClasses.push_back(human ? ClusterClass::HUMAN : ClusterClass::UNKNOWN);
         }
     }
     else
     {
         for (size_t i = 0; i < clusterClouds.size(); i++)
         {
-            clusterClasses.push_back(ClusterClassificationResult::CLASSIFICATION_FAILED);
+            clusterClasses.push_back(ClusterClass::CLASSIFICATION_FAILED);
         }
     }
 
     return clusterClasses;
 }
 
+std::vector<size_t> SpatialMapper::selectClustersByClass(
+        std::vector<ClusterClass> clusterClasses,
+        std::unordered_set<ClusterClass> classesToSelect)
+{
+    std::vector<size_t> indices;
+
+    for (size_t i = 0; i < clusterClasses.size(); i++)
+    {
+        const ClusterClass& clusterClass = clusterClasses[i];
+        if (classesToSelect.find(clusterClass) != classesToSelect.end())
+        {
+            indices.push_back(i);
+        }
+    }
+
+    return indices;
+}
+
 void SpatialMapper::publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClassificationResult>& clusterClasses,
+        const std::vector<ClusterClass>& clusterClasses,
         ros::Publisher& publisher,
         const ros::Time& timestamp)
 {
@@ -1122,19 +1149,34 @@ void SpatialMapper::publishCentroids(
         ros::Publisher& publisher,
         const ros::Time& timestamp)
 {
+    std::vector<size_t> indices;
+    for (size_t i = 0; i < centroids.size(); i++)
+    {
+        indices.push_back(i);
+    }
+
+    publishCentroids(centroids, indices, publisher, timestamp);
+}
+
+void SpatialMapper::publishCentroids(
+        const std::vector<pcl::PointXYZ>& centroids,
+        const std::vector<size_t>& indices,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp)
+{
     geometry_msgs::PoseArray poseArray;
     poseArray.header.seq = octomapSequenceNumber;
     poseArray.header.stamp = timestamp;
     poseArray.header.frame_id = "hololens_world";
 
-    for (const auto& centroid : centroids)
+    for (const auto& index : indices)
     {
-        geometry_msgs::Pose pose;
+        const pcl::PointXYZ& centroid = centroids[index];
 
+        geometry_msgs::Pose pose;
         pose.position.x = centroid.x;
         pose.position.y = centroid.y;
         pose.position.z = centroid.z;
-
         pose.orientation.w = 1.0;
 
         poseArray.poses.push_back(pose);

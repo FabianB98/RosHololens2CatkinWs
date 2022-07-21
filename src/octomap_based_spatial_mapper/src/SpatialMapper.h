@@ -118,7 +118,7 @@ struct BoundingBox
     }
 };
 
-enum ClusterClassificationResult
+enum ClusterClass
 {
     HUMAN,
     UNKNOWN,
@@ -141,11 +141,11 @@ namespace std
     };
 
     template <>
-    struct hash<ClusterClassificationResult>
+    struct hash<ClusterClass>
     {
-        std::size_t operator()(const ClusterClassificationResult& classificationResult) const
+        std::size_t operator()(const ClusterClass& clusterClass) const
         {
-            return static_cast<std::size_t>(classificationResult);
+            return static_cast<std::size_t>(clusterClass);
         }
     };
 }
@@ -233,8 +233,12 @@ private:
     std::vector<pcl::PointXYZ> calculateCentroids(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds);
 
     // Classifies each of the given voxel clusters.
-    std::vector<ClusterClassificationResult> classifyVoxelClusters(
+    std::vector<ClusterClass> classifyVoxelClusters(
         std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition);
+    
+    std::vector<size_t> selectClustersByClass(
+        std::vector<ClusterClass> clusterClasses,
+        std::unordered_set<ClusterClass> classesToSelect);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
@@ -253,13 +257,18 @@ private:
     // Publishes the given bounding boxes.
     void publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClassificationResult>& clusterClasses,
+        const std::vector<ClusterClass>& clusterClasses,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
 
     // Publishes the given centroids as a geometry_msgs::PoseArray.
     void publishCentroids(
         const std::vector<pcl::PointXYZ>& centroids,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp);
+    void publishCentroids(
+        const std::vector<pcl::PointXYZ>& centroids,
+        const std::vector<size_t>& indices,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
 
@@ -311,7 +320,7 @@ private:
     float floorHeight = 10000.0;
 
     // A map of the colors to assign to the detected object classes.
-    std::unordered_map<ClusterClassificationResult, std_msgs::ColorRGBA> objectClassColors;
+    std::unordered_map<ClusterClass, std_msgs::ColorRGBA> objectClassColors;
 
     // ROS publishers and service clients.
     ros::ServiceClient humanClassifierService;
@@ -320,7 +329,9 @@ private:
     ros::Publisher octomapDynamicObjectsPublisher;
     ros::Publisher octomapDynamicObjectClustersPublisher;
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
-    ros::Publisher dynamicClusterCentroidsPublisher;
+    ros::Publisher dynamicClusterCentroidsAllPublisher;
+    ros::Publisher dynamicClusterCentroidsHumanPublisher;
+    ros::Publisher dynamicClusterCentroidsUnknownPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

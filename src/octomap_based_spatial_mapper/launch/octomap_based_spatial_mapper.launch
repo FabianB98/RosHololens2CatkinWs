@@ -5,7 +5,17 @@
     <node name="octomap_based_spatial_mapper" pkg="octomap_based_spatial_mapper" type="octomap_based_spatial_mapper" respawn="true"/>
 
     <rosparam command="load" file="$(find octomap_based_spatial_mapper)/config/object_tracking_config.yaml"/>
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="bayes_people_tracker" respawn="true">
+    <!--
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerAll" respawn="true">
+        <param name="base_link" type="string" value="map"/>
+        <param name="target_frame" type="string" value="map"/>
+    </node>
+    -->
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerHuman" respawn="true">
+        <param name="base_link" type="string" value="map"/>
+        <param name="target_frame" type="string" value="map"/>
+    </node>
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerUnknown" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>

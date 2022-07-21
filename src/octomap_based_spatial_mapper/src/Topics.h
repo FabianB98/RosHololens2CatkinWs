@@ -7,7 +7,10 @@
 #define OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC "octomapDynamicObjectClusters"
 
 #define BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC "boundingBoxDynamicObjectClusters"
-#define DYNAMIC_CLUSTER_CENTROIDS_TOPIC "dynamicClusterCentroids"
+
+#define DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC "dynamicClusterCentroidsAll"
+#define DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC "dynamicClusterCentroidsHuman"
+#define DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC "dynamicClusterCentroidsUnknown"
 
 #define HUMAN_CLASSIFICATION_SERVICE_NAME "humanClassifier/classifyClusters"
 
