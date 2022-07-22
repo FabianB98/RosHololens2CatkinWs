@@ -1,0 +1,2 @@
+Some of the ROS packages in this repository were originally published somewhere else under some license. It is therefore almost impossible to find a license which can be used for all packages at once while also not restricting the permissive licenses too much. It was therefore chosen that each of the reused packages should keep its license as is.
+To find more information about the license of a ROS package, see /src/[package_name]/LICENSE where [package_name] denotes the name of the ROS package of interest.
