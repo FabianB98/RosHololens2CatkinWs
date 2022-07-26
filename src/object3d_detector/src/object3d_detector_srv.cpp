@@ -32,6 +32,13 @@
 // Service request and response messages
 #include "object3d_detector/ClassifyClusters.h"
 
+// A compile time switch which defines whether the individual clusters should be saved to disk. This doesn't need to
+// be a parameter which can be configured over a parameter file, as we only need save some clusters for manual annotation.
+// Furthermore, this only needs to be done once to train the SVM from scratch such that it's able to classify objects
+// correctly in most cases. Fine-tuning can then be done online (as mentioned in the paper).
+#define SAVE_CLUSTERS_TO_DISK false
+#define POINT_CLOUD_PATH_PREFIX_RELATIVE_TO_HOME "/pointCloudFrames/"
+
 typedef struct feature {
   /*** for visualization ***/
   Eigen::Vector4f centroid;
@@ -74,12 +81,12 @@ public:
   
   bool classifyClustersCallback(
     object3d_detector::ClassifyClusters::Request& req, object3d_detector::ClassifyClusters::Response& res);
-  std::vector<bool> classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position);
+  std::vector<std::pair<bool, double>> classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position);
 
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
 		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position);
   void saveFeature(Feature &f, struct svm_node *x);
-  std::vector<bool> classify(std::vector<Feature> features);
+  std::vector<std::pair<bool, double>> classify(std::vector<Feature> features);
 };
 
 Object3dDetector::Object3dDetector() {
@@ -132,6 +139,7 @@ Object3dDetector::~Object3dDetector() {
   }
 }
 
+int counter = 0;
 bool Object3dDetector::classifyClustersCallback(
     object3d_detector::ClassifyClusters::Request& req, object3d_detector::ClassifyClusters::Response& res)
 {
@@ -160,16 +168,42 @@ bool Object3dDetector::classifyClustersCallback(
   // The same applies to the sensor position which also needs to be rotated accordingly.
   pcl::PointXYZ sensor_position = pcl::PointXYZ(req.sensorPosition.x, -req.sensorPosition.z, req.sensorPosition.y);
 
-  std::vector<bool> classificationResults = classifyClusters(clusters, sensor_position);
-  for (bool result : classificationResults)
+  // Save the clusters to disk in case this is needed.
+  if (SAVE_CLUSTERS_TO_DISK) {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr clustersCombined(new pcl::PointCloud<pcl::PointXYZI>);
+    for (const auto& cluster : clusters)
+      *clustersCombined += *cluster;
+
+    // The annotation tool assumes that the sensor is located at the origin of the coordinate system, so we need to
+    // translate the point cloud accordingly.
+    // Note that I'm only translating along the XY plane in the object3d_detector coordinate system, but not along the
+    // Z axis (which corresponds to the height). While this is technically not correct, it makes it a bit easier to
+    // annotate the data as the floor and ceiling threshold can be kept constant in the annotation tool instead of
+    // needing to be changed every so often (depending on how much the HoloLens is moved in height).
+    Eigen::Matrix4f sensorPositionToOrigin
+        = Eigen::Affine3f(Eigen::Translation3f(-sensor_position.x, -sensor_position.y, 0.0f)).matrix();
+    pcl::PointCloud<pcl::PointXYZI>::Ptr clustersCombinedTranslated(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::transformPointCloud(*clustersCombined, *clustersCombinedTranslated, sensorPositionToOrigin);
+
+    std::string home = std::string(getenv("HOME"));
+    std::string directory = home + POINT_CLOUD_PATH_PREFIX_RELATIVE_TO_HOME;
+    std::string filename = boost::lexical_cast<std::string>(counter++);
+    std::string prefix = directory + filename;
+    boost::filesystem::create_directories(directory);
+    pcl::io::savePCDFileBinary(prefix + ".pcd", *clustersCombinedTranslated);
+  }
+
+  std::vector<std::pair<bool, double>> classificationResults = classifyClusters(clusters, sensor_position);
+  for (std::pair<bool, double> result : classificationResults)
   {
-    res.classificationResults.push_back(result);
+    res.classificationResults.push_back(result.first);
+    res.probabilities.push_back(result.second);
   }
 
   return true;
 }
 
-std::vector<bool> Object3dDetector::classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position)
+std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position)
 {
   std::vector<Feature> features;
   for (const auto& cluster : clusters)
@@ -439,8 +473,8 @@ void Object3dDetector::saveFeature(Feature &f, struct svm_node *x) {
   // }
 }
   
-std::vector<bool> Object3dDetector::classify(std::vector<Feature> features) {
-  std::vector<bool> classificationResults;
+std::vector<std::pair<bool, double>> Object3dDetector::classify(std::vector<Feature> features) {
+  std::vector<std::pair<bool, double>> classificationResults;
 
   for(std::vector<Feature>::iterator it = features.begin(); it != features.end(); ++it) {
     if(use_svm_model_) {
@@ -463,12 +497,13 @@ std::vector<bool> Object3dDetector::classify(std::vector<Feature> features) {
       if(is_probability_model_) {
 	      double prob_estimates[svm_model_->nr_class];
       	svm_predict_probability(svm_model_, svm_node_, prob_estimates);
-        classificationResults.push_back(prob_estimates[0] >= human_probability_);
+        classificationResults.push_back(std::make_pair(prob_estimates[0] >= human_probability_, prob_estimates[0]));
       } else {
-        classificationResults.push_back(svm_predict(svm_model_, svm_node_) == 1);
+        bool classified = svm_predict(svm_model_, svm_node_) == 1;
+        classificationResults.push_back(std::make_pair(classified, classified ? 1.0 : 0.0));
       }
     } else {
-      classificationResults.push_back(false);
+      classificationResults.push_back(std::make_pair(false, 0.0));
     }
   }
 
