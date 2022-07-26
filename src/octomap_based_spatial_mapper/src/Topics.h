@@ -10,9 +10,11 @@
 
 #define DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC "dynamicClusterCentroidsAll"
 #define DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC "dynamicClusterCentroidsHuman"
+#define DYNAMIC_CLUSTER_CENTROIDS_ROBOT_TOPIC "dynamicClusterCentroidsRobot"
 #define DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC "dynamicClusterCentroidsUnknown"
 
-#define HUMAN_CLASSIFICATION_SERVICE_NAME "humanClassifier/classifyClusters"
+#define HUMAN_CLASSIFICATION_SERVICE_NAME "clustersClassifierHuman/classifyClusters"
+#define ROBOT_CLASSIFICATION_SERVICE_NAME "clustersClassifierRobot/classifyClusters"
 
 #define ENABLE_SPATIAL_MAP_UPDATES_TOPIC "enableSpatialMapUpdates"
 #define CLEAR_SPATIAL_MAP_TOPIC "clearSpatialMap"

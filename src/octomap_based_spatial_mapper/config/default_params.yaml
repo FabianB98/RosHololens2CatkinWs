@@ -29,3 +29,4 @@ voxelClusteringMinClusterSize: 8  # With a leaf size of 5 cm each voxel holds a 
 doNoiseClusterRemoval: true
 noiseClusterRemovalRelativeNeighborDistance: 1.0
 noiseClusterRemovalStaticNeighborPercentage: 0.75
+noiseClusterRemovalAddNoiseClustersToStaticMap: true

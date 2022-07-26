@@ -30,9 +30,10 @@
 #define VOXEL_CLUSTERING_MIN_CLUSTER_SIZE 10            // Discard clusters with less than this amount of voxels.
 
 // Switches and hyper parameters for removal of dynamic voxel clusters containing only sensor noise.
-#define DO_NOISE_CLUSTER_REMOVAL true                           // Whether clusters of sensor noise should be removed.
-#define NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE 1.0    // The distance to neighboring voxels relative to leaf size.
-#define NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE 0.75   // How many voxels of the cluster must have a static neighbor.
+#define DO_NOISE_CLUSTER_REMOVAL true                               // Whether clusters of sensor noise should be removed.
+#define NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE 1.0        // The distance to neighboring voxels relative to leaf size.
+#define NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE 0.75       // How many voxels of the cluster must have a static neighbor.
+#define NOISE_CLUSTER_REMOVAL_ADD_NOISE_CLUSTERS_TO_STATIC_MAP true // Should noise clusters be added to the spatial map of static objects?
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
@@ -62,6 +63,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("noiseClusterRemovalRelativeNeighborDistance", noiseClusterRemovalRelativeNeighborDistance, NOISE_CLUSTER_REMOVAL_RELATIVE_NEIGHBOR_DISTANCE);
     n.param("noiseClusterRemovalStaticNeighborPercentage", noiseClusterRemovalStaticNeighborPercentage, NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE);
     noiseClusterRemovalNoStaticNeighborPercentage = 1.0 - noiseClusterRemovalStaticNeighborPercentage;
+    n.param("noiseClusterRemovalAddNoiseClustersToStaticMap", noiseClusterRemovalAddNoiseClustersToStaticMap, NOISE_CLUSTER_REMOVAL_ADD_NOISE_CLUSTERS_TO_STATIC_MAP);
 
     // Initialize the array of the neighborhoods to check when filtering voxels and when clustering voxels.
     octreeFilteringNeighborhood = initializeEuclideanDistanceNeighborhood(octreeFilteringRelativeNeighborDistance);
@@ -102,6 +104,13 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     humanColor.a = 1.0;
     objectClassColors[ClusterClass::HUMAN] = humanColor;
 
+    std_msgs::ColorRGBA robotColor;
+    robotColor.r = 1.0;
+    robotColor.g = 0.5;
+    robotColor.b = 0.0;
+    robotColor.a = 1.0;
+    objectClassColors[ClusterClass::ROBOT] = robotColor;
+
     std_msgs::ColorRGBA unknownColor;
     unknownColor.r = 0.5;
     unknownColor.g = 0.5;
@@ -121,6 +130,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
 
     // Register the service clients for all services which will be called.
     humanClassifierService = n.serviceClient<object3d_detector::ClassifyClusters>(HUMAN_CLASSIFICATION_SERVICE_NAME);
+    robotClassifierService = n.serviceClient<object3d_detector::ClassifyClusters>(ROBOT_CLASSIFICATION_SERVICE_NAME);
 
     // Advertise the topics to which the results will be published.
     octomapCurrentFramePublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_CURRENT_FRAME_TOPIC, 10);
@@ -130,6 +140,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
     dynamicClusterCentroidsAllPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC, 10);
     dynamicClusterCentroidsHumanPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC, 10);
+    dynamicClusterCentroidsRobotPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_ROBOT_TOPIC, 10);
     dynamicClusterCentroidsUnknownPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC, 10);
 }
 
@@ -243,7 +254,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
                 noiseClusterDetectionResult = removeNoiseVoxelClusters(dynamicObjectClusters);
         dynamicObjectClusters = noiseClusterDetectionResult.first;
 
-        if (updateSpatialMapThisFrame)
+        if (updateSpatialMapThisFrame && noiseClusterRemovalAddNoiseClustersToStaticMap)
         {
             std::vector<std::vector<octomap::point3d>> noiseClusters = noiseClusterDetectionResult.second;
             addClustersToStaticObjectsMap(noiseClusters);
@@ -264,6 +275,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     std::vector<ClusterClass> clusterClasses = classifyVoxelClusters(clusterPointClouds,
             msg->hololensPosition.point);
     std::vector<size_t> clusterIndicesHuman = selectClustersByClass(clusterClasses, {ClusterClass::HUMAN});
+    std::vector<size_t> clusterIndicesRobot = selectClustersByClass(clusterClasses, {ClusterClass::ROBOT});
     std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(clusterClasses,
             {ClusterClass::UNKNOWN, ClusterClass::CLASSIFICATION_FAILED});
 
@@ -281,6 +293,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishBoundingBoxes(boundingBoxes, clusterClasses, boundingBoxDynamicObjectClustersPublisher, time);
     publishCentroids(clusterCentroids, dynamicClusterCentroidsAllPublisher, time);
     publishCentroids(clusterCentroids, clusterIndicesHuman, dynamicClusterCentroidsHumanPublisher, time);
+    publishCentroids(clusterCentroids, clusterIndicesRobot, dynamicClusterCentroidsRobotPublisher, time);
     publishCentroids(clusterCentroids, clusterIndicesUnknown, dynamicClusterCentroidsUnknownPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
@@ -1025,23 +1038,47 @@ std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
     if (clusterClouds.size() == 0)
         return clusterClasses;
 
-    object3d_detector::ClassifyClusters humanClassificationMsg;
+    object3d_detector::ClassifyClusters::Request classificationRequestMsg;
     for (auto& clusterCloud : clusterClouds)
     {
         sensor_msgs::PointCloud2 clusterCloudMsg;
         pcl::toROSMsg(*clusterCloud, clusterCloudMsg);
-        humanClassificationMsg.request.clusters.push_back(clusterCloudMsg);
+        classificationRequestMsg.clusters.push_back(clusterCloudMsg);
     }
-    humanClassificationMsg.request.sensorPosition = sensorPosition;
+    classificationRequestMsg.sensorPosition = sensorPosition;
 
+    object3d_detector::ClassifyClusters humanClassificationMsg;
+    humanClassificationMsg.request = classificationRequestMsg;
     bool humanClassificationSuccess = humanClassifierService.call(humanClassificationMsg);
 
-    if (humanClassificationSuccess)
+    object3d_detector::ClassifyClusters robotClassificationMsg;
+    robotClassificationMsg.request = classificationRequestMsg;
+    bool robotClassificationSuccess = robotClassifierService.call(robotClassificationMsg);
+
+    if (humanClassificationSuccess && robotClassificationSuccess)
     {
         for (size_t i = 0; i < clusterClouds.size(); i++)
         {
-            const bool& human = humanClassificationMsg.response.classificationResults[i];
-            clusterClasses.push_back(human ? ClusterClass::HUMAN : ClusterClass::UNKNOWN);
+            ClusterClass clusterClass = ClusterClass::UNKNOWN;
+            double classProbability = -1.0;
+
+            const bool& isHuman = humanClassificationMsg.response.classificationResults[i];
+            const double& humanProbability = humanClassificationMsg.response.probabilities[i];
+            if (isHuman && humanProbability > classProbability)
+            {
+                clusterClass = ClusterClass::HUMAN;
+                classProbability = humanProbability;
+            }
+
+            const bool& isRobot = robotClassificationMsg.response.classificationResults[i];
+            const double& robotProbability = robotClassificationMsg.response.probabilities[i];
+            if (isRobot && robotProbability > classProbability)
+            {
+                clusterClass = ClusterClass::ROBOT;
+                classProbability = robotProbability;
+            }
+
+            clusterClasses.push_back(clusterClass);
         }
     }
     else

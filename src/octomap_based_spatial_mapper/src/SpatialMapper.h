@@ -121,6 +121,7 @@ struct BoundingBox
 enum ClusterClass
 {
     HUMAN,
+    ROBOT,
     UNKNOWN,
     CLASSIFICATION_FAILED
 };
@@ -304,6 +305,7 @@ private:
     double noiseClusterRemovalStaticNeighborPercentage;
     double noiseClusterRemovalNoStaticNeighborPercentage;
     std::vector<octomap::point3d> noiseClusterRemovalNeighborhood;
+    bool noiseClusterRemovalAddNoiseClustersToStaticMap;
 
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
@@ -324,6 +326,7 @@ private:
 
     // ROS publishers and service clients.
     ros::ServiceClient humanClassifierService;
+    ros::ServiceClient robotClassifierService;
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;
@@ -331,6 +334,7 @@ private:
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
     ros::Publisher dynamicClusterCentroidsAllPublisher;
     ros::Publisher dynamicClusterCentroidsHumanPublisher;
+    ros::Publisher dynamicClusterCentroidsRobotPublisher;
     ros::Publisher dynamicClusterCentroidsUnknownPublisher;
 
     // Sequence numbers used for publishing the results.

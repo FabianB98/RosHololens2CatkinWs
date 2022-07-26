@@ -15,14 +15,24 @@
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerRobot" respawn="true">
+        <param name="base_link" type="string" value="map"/>
+        <param name="target_frame" type="string" value="map"/>
+    </node>
     <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerUnknown" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
 
-    <node pkg="object3d_detector" type="object3d_detector_srv" name="humanClassifier" respawn="true">
+    <node pkg="object3d_detector" type="object3d_detector_srv" name="clustersClassifierHuman" respawn="true">
         <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.model"/>
         <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.range"/>
+
+        <param name="human_probability" type="double" value="0.7"/>
+    </node>
+    <node pkg="object3d_detector" type="object3d_detector_srv" name="clustersClassifierRobot" respawn="true">
+        <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/robot_hololens.model"/>
+        <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/robot_hololens.range"/>
 
         <param name="human_probability" type="double" value="0.7"/>
     </node>
