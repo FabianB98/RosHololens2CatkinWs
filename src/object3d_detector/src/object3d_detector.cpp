@@ -84,9 +84,9 @@ public:
   
   void pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
   
-  void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position);
+  void extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Eigen::Vector4f &sensor_position);
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position);
+		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, Eigen::Vector4f &sensor_position);
   void saveFeature(Feature &f, struct svm_node *x);
   void classify();
 };
@@ -171,12 +171,24 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
   // We need to transform the point cloud accordingly such that the coordinate systems match up.
   Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
   hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
-  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
 
   // The same applies to the sensor position which also needs to be rotated accordingly.
   pcl::PointXYZ sensor_position
       = pcl::PointXYZ(msg->hololensPosition.point.x, -msg->hololensPosition.point.z, msg->hololensPosition.point.y);
+
+  // For classification the points need to be in a coordinate system relative to the sensor position (i.e. a coordinate
+  // system in which the sensor is located at the origin), so we need to translate all points accordingly.
+  // Please note that it is technically not quite correct to only translate along the XY plane, but not along the Z axis
+  // (i.e. the height). However, if the point cloud was also translated along the height axis, this would cause the
+  // floor and ceiling detection to break. It was therefore chosen to only translate the points along the XY plane. This
+  // also has the benefit of the saved point clouds being easier to annotate as the floor and ceiling threshold can be
+  // kept constant instead of needing to be adjusted every so often (depending on how much the HoloLens is moved in
+  // height).
+  Eigen::Vector4f sensorTranslation(sensor_position.x, sensor_position.y, 0.0f, 0.0f);
+  Eigen::Matrix4f sensorPositionToOrigin = Eigen::Affine3f(Eigen::Translation3f(-sensorTranslation.head<3>())).matrix();
+  hololensToObject3dDetector = sensorPositionToOrigin * hololensToObject3dDetector;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
 
   if (SAVE_POINT_CLOUDS_TO_DISK && pcl_pc->size() > 0) {
     std::string home = std::string(getenv("HOME"));
@@ -187,7 +199,7 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     pcl::io::savePCDFileBinary(prefix + ".pcd", *pcl_pc);
   }
   
-  extractCluster(pcl_pc, sensor_position);
+  extractCluster(pcl_pc, sensorTranslation);
   classify();
   
   if(print_fps_)if(++frames>10){std::cerr<<"[object3d_detector]: fps = "<<float(frames)/(float(clock()-start_time)/CLOCKS_PER_SEC)<<", timestamp = "<<clock()/CLOCKS_PER_SEC<<std::endl;reset = true;}//fps
@@ -195,7 +207,7 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
 
 const int nested_regions_ = 14;
 int zone_[nested_regions_] = {2,3,3,3,3,3,3,2,3,3,3,3,3,3}; // for more details, see our IROS'17 paper.
-void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, pcl::PointXYZ sensor_position) {
+void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Eigen::Vector4f &sensor_position) {
   features_.clear();
   
   float min_z_in_frame = 0.0;
@@ -285,15 +297,11 @@ void Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, p
   
   boost::array<std::vector<int>, nested_regions_> indices_array;
   for(int i = 0; i < pc_indices->size(); i++) {
-    const pcl::PointXYZI& point = (*pc_indices)[i];
-    pcl::PointXYZ diff_to_sensor_position;
-    diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
-    float d2 = diff_to_sensor_position.x * diff_to_sensor_position.x +
-        diff_to_sensor_position.y * diff_to_sensor_position.y +
-        diff_to_sensor_position.z * diff_to_sensor_position.z;
-
     float range = 0.0;
     for(int j = 0; j < nested_regions_; j++) {
+      float d2 = pc->points[(*pc_indices)[i]].x * pc->points[(*pc_indices)[i]].x +
+	      pc->points[(*pc_indices)[i]].y * pc->points[(*pc_indices)[i]].y +
+	      pc->points[(*pc_indices)[i]].z * pc->points[(*pc_indices)[i]].z;
       if(d2 > range*range && d2 <= (range+zone_[j])*(range+zone_[j])) {
       	indices_array[j].push_back((*pc_indices)[i]);
       	break;
@@ -509,10 +517,10 @@ void computeIntensity(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int bins, float *
 }
 
 void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position) {
-  f.centroid = centroid;
-  f.min = min;
-  f.max = max;
+				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, Eigen::Vector4f &sensor_position) {
+  f.centroid = centroid + sensor_position;
+  f.min = min + sensor_position;
+  f.max = max + sensor_position;
   
   if(use_svm_model_) {
     // f1: Number of points included the cluster.
@@ -521,13 +529,7 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
     f.min_distance = FLT_MAX;
     float d2; //squared Euclidean distance
     for(int i = 0; i < pc->size(); i++) {
-      const pcl::PointXYZI& point = pc->points[i];
-      pcl::PointXYZ diff_to_sensor_position;
-      diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
-      d2 = diff_to_sensor_position.x * diff_to_sensor_position.x + 
-          diff_to_sensor_position.y * diff_to_sensor_position.y + 
-          diff_to_sensor_position.z * diff_to_sensor_position.z;
-
+      d2 = pc->points[i].x*pc->points[i].x + pc->points[i].y*pc->points[i].y + pc->points[i].z*pc->points[i].z;
       if(f.min_distance > d2)
 	      f.min_distance = d2;
     }

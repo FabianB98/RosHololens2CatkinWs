@@ -81,10 +81,10 @@ public:
   
   bool classifyClustersCallback(
     object3d_detector::ClassifyClusters::Request& req, object3d_detector::ClassifyClusters::Response& res);
-  std::vector<std::pair<bool, double>> classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position);
+  std::vector<std::pair<bool, double>> classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters);
 
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position);
+		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid);
   void saveFeature(Feature &f, struct svm_node *x);
   std::vector<std::pair<bool, double>> classify(std::vector<Feature> features);
 };
@@ -151,6 +151,19 @@ bool Object3dDetector::classifyClustersCallback(
   Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
   hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
 
+  // The same applies to the sensor position which also needs to be rotated accordingly.
+  pcl::PointXYZ sensor_position = pcl::PointXYZ(req.sensorPosition.x, -req.sensorPosition.z, req.sensorPosition.y);
+
+  // For classification the points need to be in a coordinate system relative to the sensor position (i.e. a coordinate
+  // system in which the sensor is located at the origin), so we need to translate all points accordingly.
+  // Please note that it is technically not quite correct to only translate along the XY plane, but not along the Z axis
+  // (i.e. the height). However, it was chosen to only translate the points along the XY plane as this causes saved
+  // point clouds being easier to annotate as the floor and ceiling threshold can be kept constant instead of needing to
+  // be adjusted every so often (depending on how much the HoloLens is moved in height).
+  Eigen::Matrix4f sensorPositionToOrigin
+      = Eigen::Affine3f(Eigen::Translation3f(-sensor_position.x, -sensor_position.y, 0)).matrix();
+  hololensToObject3dDetector = sensorPositionToOrigin * hololensToObject3dDetector;
+
   std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters;
   for (const auto& clusterMsg : req.clusters)
   {
@@ -165,35 +178,21 @@ bool Object3dDetector::classifyClustersCallback(
     clusters.push_back(cluster);
   }
 
-  // The same applies to the sensor position which also needs to be rotated accordingly.
-  pcl::PointXYZ sensor_position = pcl::PointXYZ(req.sensorPosition.x, -req.sensorPosition.z, req.sensorPosition.y);
-
   // Save the clusters to disk in case this is needed.
   if (SAVE_CLUSTERS_TO_DISK) {
     pcl::PointCloud<pcl::PointXYZI>::Ptr clustersCombined(new pcl::PointCloud<pcl::PointXYZI>);
     for (const auto& cluster : clusters)
       *clustersCombined += *cluster;
 
-    // The annotation tool assumes that the sensor is located at the origin of the coordinate system, so we need to
-    // translate the point cloud accordingly.
-    // Note that I'm only translating along the XY plane in the object3d_detector coordinate system, but not along the
-    // Z axis (which corresponds to the height). While this is technically not correct, it makes it a bit easier to
-    // annotate the data as the floor and ceiling threshold can be kept constant in the annotation tool instead of
-    // needing to be changed every so often (depending on how much the HoloLens is moved in height).
-    Eigen::Matrix4f sensorPositionToOrigin
-        = Eigen::Affine3f(Eigen::Translation3f(-sensor_position.x, -sensor_position.y, 0.0f)).matrix();
-    pcl::PointCloud<pcl::PointXYZI>::Ptr clustersCombinedTranslated(new pcl::PointCloud<pcl::PointXYZI>);
-    pcl::transformPointCloud(*clustersCombined, *clustersCombinedTranslated, sensorPositionToOrigin);
-
     std::string home = std::string(getenv("HOME"));
     std::string directory = home + POINT_CLOUD_PATH_PREFIX_RELATIVE_TO_HOME;
     std::string filename = boost::lexical_cast<std::string>(counter++);
     std::string prefix = directory + filename;
     boost::filesystem::create_directories(directory);
-    pcl::io::savePCDFileBinary(prefix + ".pcd", *clustersCombinedTranslated);
+    pcl::io::savePCDFileBinary(prefix + ".pcd", *clustersCombined);
   }
 
-  std::vector<std::pair<bool, double>> classificationResults = classifyClusters(clusters, sensor_position);
+  std::vector<std::pair<bool, double>> classificationResults = classifyClusters(clusters);
   for (std::pair<bool, double> result : classificationResults)
   {
     res.classificationResults.push_back(result.first);
@@ -203,7 +202,7 @@ bool Object3dDetector::classifyClustersCallback(
   return true;
 }
 
-std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters, pcl::PointXYZ sensor_position)
+std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters)
 {
   std::vector<Feature> features;
   for (const auto& cluster : clusters)
@@ -213,7 +212,7 @@ std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vec
     pcl::compute3DCentroid(*cluster, centroid);
 
     Feature f;
-    extractFeature(cluster, f, min, max, centroid, sensor_position);
+    extractFeature(cluster, f, min, max, centroid);
     features.push_back(f);
   }
 
@@ -382,7 +381,7 @@ void computeIntensity(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, int bins, float *
 }
 
 void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
-				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid, pcl::PointXYZ sensor_position) {
+				      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid) {
   f.centroid = centroid;
   f.min = min;
   f.max = max;
@@ -394,13 +393,7 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
     f.min_distance = FLT_MAX;
     float d2; //squared Euclidean distance
     for(int i = 0; i < pc->size(); i++) {
-      const pcl::PointXYZI& point = pc->points[i];
-      pcl::PointXYZ diff_to_sensor_position;
-      diff_to_sensor_position.getArray3fMap() = point.getArray3fMap() - sensor_position.getArray3fMap();
-      d2 = diff_to_sensor_position.x * diff_to_sensor_position.x + 
-          diff_to_sensor_position.y * diff_to_sensor_position.y + 
-          diff_to_sensor_position.z * diff_to_sensor_position.z;
-
+      d2 = pc->points[i].x*pc->points[i].x + pc->points[i].y*pc->points[i].y + pc->points[i].z*pc->points[i].z;
       if(f.min_distance > d2)
 	      f.min_distance = d2;
     }
