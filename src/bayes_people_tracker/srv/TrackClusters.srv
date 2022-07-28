@@ -1,0 +1,5 @@
+string detectorName
+geometry_msgs/PoseArray clusterCenterPoints
+---
+int64[] trackIds
+geometry_msgs/Pose[] trackedPoints

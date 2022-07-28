@@ -25,6 +25,11 @@ add_message_files(
   PeopleTracker.msg
 )
 
+add_service_files(
+  FILES
+  TrackClusters.srv
+)
+
 generate_messages(
   DEPENDENCIES
   std_msgs
@@ -77,6 +82,18 @@ target_link_libraries(bayes_people_tracker_ol
 
 target_compile_definitions(bayes_people_tracker_ol PUBLIC ONLINE_LEARNING=1)
 
+### Service version
+add_executable(bayes_people_tracker_srv
+  src/people_tracker/tracking_service.cpp
+)
+
+add_dependencies(bayes_people_tracker_srv ${PROJECT_NAME}_generate_messages_cpp ${catkin_EXPORTED_TARGETS})
+
+target_link_libraries(bayes_people_tracker_srv
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
+
 #############
 ## Install ##
 #############
@@ -88,6 +105,12 @@ install(TARGETS bayes_people_tracker
 )
 
 install(TARGETS bayes_people_tracker_ol
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS bayes_people_tracker_srv
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
