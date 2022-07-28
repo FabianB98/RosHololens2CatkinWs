@@ -131,6 +131,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     // Register the service clients for all services which will be called.
     humanClassifierService = n.serviceClient<object3d_detector::ClassifyClusters>(HUMAN_CLASSIFICATION_SERVICE_NAME);
     robotClassifierService = n.serviceClient<object3d_detector::ClassifyClusters>(ROBOT_CLASSIFICATION_SERVICE_NAME);
+    clusterTrackingService = n.serviceClient<bayes_people_tracker::TrackClusters>(CLUSTER_TRACKING_SERVICE_NAME);
 
     // Advertise the topics to which the results will be published.
     octomapCurrentFramePublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_CURRENT_FRAME_TOPIC, 10);
@@ -273,7 +274,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
 
     // Classify each cluster.
     std::vector<ClusterClass> clusterClasses = classifyVoxelClusters(clusterPointClouds,
-            msg->hololensPosition.point);
+            clusterCentroids, msg->hololensPosition.point);
     std::vector<size_t> clusterIndicesHuman = selectClustersByClass(clusterClasses, {ClusterClass::HUMAN});
     std::vector<size_t> clusterIndicesRobot = selectClustersByClass(clusterClasses, {ClusterClass::ROBOT});
     std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(clusterClasses,
@@ -1031,7 +1032,9 @@ std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
 }
 
 std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
-        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition)
+        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds,
+        std::vector<pcl::PointXYZ> clusterCentroids,
+        geometry_msgs::Point sensorPosition)
 {
     std::vector<ClusterClass> clusterClasses;
 
@@ -1055,30 +1058,115 @@ std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
     robotClassificationMsg.request = classificationRequestMsg;
     bool robotClassificationSuccess = robotClassifierService.call(robotClassificationMsg);
 
-    if (humanClassificationSuccess && robotClassificationSuccess)
+    // TODO: The following blocks of code are not finalized yet and need to be tidied up later on.
+    bayes_people_tracker::TrackClusters clusterTrackingMsg;
+    clusterTrackingMsg.request.detectorName = "octomap_based_spatial_mapper";
+    clusterTrackingMsg.request.clusterCenterPoints.header.seq = octomapSequenceNumber;
+    clusterTrackingMsg.request.clusterCenterPoints.header.stamp = ros::Time::now();
+    clusterTrackingMsg.request.clusterCenterPoints.header.frame_id = "hololens_world";
+    for (const auto& clusterCentroid : clusterCentroids)
+    {
+        geometry_msgs::Pose pose;
+        pose.position.x = clusterCentroid.x;
+        pose.position.y = clusterCentroid.y;
+        pose.position.z = clusterCentroid.z;
+        pose.orientation.w = 1.0;
+
+        clusterTrackingMsg.request.clusterCenterPoints.poses.push_back(pose);
+    }
+    bool trackingSuccess = clusterTrackingService.call(clusterTrackingMsg);
+
+    if (humanClassificationSuccess && robotClassificationSuccess && trackingSuccess)
     {
         for (size_t i = 0; i < clusterClouds.size(); i++)
         {
-            ClusterClass clusterClass = ClusterClass::UNKNOWN;
-            double classProbability = -1.0;
+            const pcl::PointXYZ& clusterCentroid = clusterCentroids[i];
+            long trackId = -1;
+            for (size_t j = 0; j < clusterTrackingMsg.response.trackedPoints.size(); j++)
+            {
+                const geometry_msgs::Pose& trackedPoint = clusterTrackingMsg.response.trackedPoints[j];
 
+                // The tracker doesn't track along the height, meaning the tracked points all have a y-value of zero, so
+                // their y-value can't be compared with the y-values of the cluster centroids.
+                float dX = clusterCentroid.x - trackedPoint.position.x;
+                float dZ = clusterCentroid.z - trackedPoint.position.z;
+                float squaredDistance = dX * dX + dZ * dZ;
+                if (squaredDistance <= 0.1 * 0.1)
+                {
+                    trackId = clusterTrackingMsg.response.trackIds[j];
+                    break;
+                }
+            }
+
+            // Checking the probabilities returned by the SVMs is useless as these probabilities appear to be always
+            // either 0.0 or 1.0, but nothing inbetween...
             const bool& isHuman = humanClassificationMsg.response.classificationResults[i];
-            const double& humanProbability = humanClassificationMsg.response.probabilities[i];
-            if (isHuman && humanProbability > classProbability)
-            {
-                clusterClass = ClusterClass::HUMAN;
-                classProbability = humanProbability;
-            }
-
             const bool& isRobot = robotClassificationMsg.response.classificationResults[i];
-            const double& robotProbability = robotClassificationMsg.response.probabilities[i];
-            if (isRobot && robotProbability > classProbability)
-            {
-                clusterClass = ClusterClass::ROBOT;
-                classProbability = robotProbability;
-            }
 
-            clusterClasses.push_back(clusterClass);
+            if (trackId == -1)
+            {
+                // The SVM used for tracking only appears to output either 0.0 or 1.0 as class probabilities, but
+                // nothing inbetween. As these class probabilities are therefore useless, we can ignore them...
+                // This will obviously come with the drawback that in case a cluster is classified as being both a human
+                // and a robot, that cluster will always be labelled with the class HUMAN.
+                clusterClasses.push_back(
+                    isHuman ? ClusterClass::HUMAN : 
+                    isRobot ? ClusterClass::ROBOT : 
+                    ClusterClass::UNKNOWN);
+            }
+            else
+            {
+                if (objectClassDetectionsPrevFrames.find(trackId) == objectClassDetectionsPrevFrames.end())
+                {
+                    // TODO: The size of the circular buffer should be configurable parameter.
+                    objectClassDetectionsPrevFrames[trackId] = boost::circular_buffer<std::vector<ClusterClass>>(25);
+                    objectClassDetectionCounts[trackId] = std::unordered_map<ClusterClass, int>();
+                    objectClassDetectionCounts[trackId][ClusterClass::HUMAN] = 0;
+                    objectClassDetectionCounts[trackId][ClusterClass::ROBOT] = 0;
+                    objectClassDetectionCounts[trackId][ClusterClass::UNKNOWN] = 0;
+                }
+
+                auto& previousDetections = objectClassDetectionsPrevFrames[trackId];
+                auto& detectionCounts = objectClassDetectionCounts[trackId];
+
+                if (previousDetections.full())
+                {
+                    for (const auto& clusterClass : previousDetections.front())
+                    {
+                        detectionCounts[clusterClass]--;
+                    }
+                    previousDetections.pop_front();
+                }
+
+                std::vector<ClusterClass> currentDetections;
+                if (isHuman || isRobot)
+                {
+                    if (isHuman) currentDetections.push_back(ClusterClass::HUMAN);
+                    if (isRobot) currentDetections.push_back(ClusterClass::ROBOT);
+                }
+                else
+                {
+                    currentDetections.push_back(ClusterClass::UNKNOWN);
+                }
+                previousDetections.push_back(currentDetections);
+                for (const auto& clusterClass : currentDetections)
+                {
+                    detectionCounts[clusterClass]++;
+                }
+
+                ClusterClass clusterClass = ClusterClass::UNKNOWN;
+                int classDetectionCount = 0;
+                for (const auto& classAndCount : detectionCounts)
+                {
+                    if (classAndCount.second > classDetectionCount)
+                    {
+                        clusterClass = classAndCount.first;
+                        classDetectionCount = classAndCount.second;
+                    }
+                }
+
+                clusterClasses.push_back(clusterClass);
+            }
         }
     }
     else

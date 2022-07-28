@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   visualization_msgs
   object3d_detector
+  bayes_people_tracker
 )
 # I don't understand why octomap needs to be in a separate find_package call,
 # but if I move it to the find_package call above, then it won't compile...

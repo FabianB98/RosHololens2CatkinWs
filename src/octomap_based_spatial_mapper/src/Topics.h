@@ -16,5 +16,7 @@
 #define HUMAN_CLASSIFICATION_SERVICE_NAME "clustersClassifierHuman/classifyClusters"
 #define ROBOT_CLASSIFICATION_SERVICE_NAME "clustersClassifierRobot/classifyClusters"
 
+#define CLUSTER_TRACKING_SERVICE_NAME "clustersTrackerAllClassification/trackClusters"
+
 #define ENABLE_SPATIAL_MAP_UPDATES_TOPIC "enableSpatialMapUpdates"
 #define CLEAR_SPATIAL_MAP_TOPIC "clearSpatialMap"

@@ -16,11 +16,14 @@
 #include "geometry_msgs/PoseArray.h"
 #include "geometry_msgs/PoseStamped.h"
 #include "geometry_msgs/Quaternion.h"
-#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
-#include "object3d_detector/ClassifyClusters.h"
 #include "visualization_msgs/Marker.h"
 #include "visualization_msgs/MarkerArray.h"
 
+#include "bayes_people_tracker/TrackClusters.h"
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
+#include "object3d_detector/ClassifyClusters.h"
+
+#include <boost/circular_buffer.hpp>
 #include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
 
@@ -235,7 +238,9 @@ private:
 
     // Classifies each of the given voxel clusters.
     std::vector<ClusterClass> classifyVoxelClusters(
-        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds, geometry_msgs::Point sensorPosition);
+        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds,
+        std::vector<pcl::PointXYZ> clusterCentroids,
+        geometry_msgs::Point sensorPosition);
     
     std::vector<size_t> selectClustersByClass(
         std::vector<ClusterClass> clusterClasses,
@@ -321,12 +326,15 @@ private:
     // The currently estimated floor height.
     float floorHeight = 10000.0;
 
-    // A map of the colors to assign to the detected object classes.
+    // Information about the class of tracked objects and a map of the colors to assign to the detected object classes.
+    std::unordered_map<long, boost::circular_buffer<std::vector<ClusterClass>>> objectClassDetectionsPrevFrames;
+    std::unordered_map<long, std::unordered_map<ClusterClass, int>> objectClassDetectionCounts;
     std::unordered_map<ClusterClass, std_msgs::ColorRGBA> objectClassColors;
 
     // ROS publishers and service clients.
     ros::ServiceClient humanClassifierService;
     ros::ServiceClient robotClassifierService;
+    ros::ServiceClient clusterTrackingService;
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;
