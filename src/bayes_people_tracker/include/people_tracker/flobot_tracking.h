@@ -135,7 +135,6 @@ class SimpleTracking {
   
   std::map<long, std::vector<geometry_msgs::Pose> > track(double* track_time = NULL) {
     boost::mutex::scoped_lock lock(mutex);
-    std::map<long, std::vector<geometry_msgs::Pose> > result;
     dt = getTime() - time;
     time += dt;
     if(track_time) *track_time = time;
@@ -155,42 +154,8 @@ class SimpleTracking {
     //            mtrk.process(*(it->second.ctm), it->second.alg,  it->second.seqSize,  it->second.seqTime);
     //        }
     //==========================================================================//
-    
-    for (int i = 0; i < mtrk.size(); i++) {
-      double theta = atan2(mtrk[i].filter->x[3], mtrk[i].filter->x[1]);
-      /* ROS_DEBUG("trk_%ld: Position: (%f, %f), Orientation: %f, Std Deviation: %f, %f", */
-      /* 		mtrk[i].id, */
-      /* 		mtrk[i].filter->x[0], mtrk[i].filter->x[2], //x, y */
-      /* 		theta, //orientation */
-      /* 		sqrt(mtrk[i].filter->X(0,0)), sqrt(mtrk[i].filter->X(2,2))//std dev */
-      /* 		); */
-      
-      geometry_msgs::Pose pose, vel, var; // position, velocity, variance
-      
-      pose.position.x = mtrk[i].filter->x[0];
-      pose.position.y = mtrk[i].filter->x[2];
-      pose.orientation.z = sin(theta/2);
-      pose.orientation.w = cos(theta/2);
-#ifdef ONLINE_LEARNING
-      if(mtrk[i].detector_name == "object3d_detector")
-	pose.position.z = std::atoi(mtrk[i].pose_id.c_str());
-      else
-	pose.position.z = -1.0;
-      //std::cerr << "track ID = " << mtrk[i].id << ", pose ID = " << mtrk[i].pose_id << std::endl;
-#endif
-      result[mtrk[i].id].push_back(pose);
-      
-      vel.position.x = mtrk[i].filter->x[1];
-      vel.position.y = mtrk[i].filter->x[3];
-      result[mtrk[i].id].push_back(vel);
-      
-      var.position.x = mtrk[i].filter->X(0,0);
-      var.position.y = mtrk[i].filter->X(2,2);
-      var.orientation.x = mtrk[i].filter->X(0,2);
-      var.orientation.y = mtrk[i].filter->X(2,0);
-      result[mtrk[i].id].push_back(var);
-    }
-    return result;
+
+    return _getTrackedObjects();
   }
   
   void addObservation(std::string detector_name, std::vector<geometry_msgs::Point> obsv, double obsv_time, geometry_msgs::Pose &robot_pose) {
@@ -240,6 +205,12 @@ class SimpleTracking {
       mtrk.process(*(det.plm), det.om_flag, det.alg, det.seqSize, det.seqTime, stdLimit);
     }
   }
+
+  std::map<long, std::vector<geometry_msgs::Pose> > getTrackedObjects()
+  {
+    boost::mutex::scoped_lock lock(mutex);
+    return _getTrackedObjects();
+  }
   
  private:
   FM::Vec *observation;             // observation [x, y]
@@ -259,6 +230,47 @@ class SimpleTracking {
   } detector_model;
   std::map<std::string, detector_model> detectors;
   
+  std::map<long, std::vector<geometry_msgs::Pose> > _getTrackedObjects()
+  {
+    std::map<long, std::vector<geometry_msgs::Pose> > result;
+    for (int i = 0; i < mtrk.size(); i++) {
+      double theta = atan2(mtrk[i].filter->x[3], mtrk[i].filter->x[1]);
+      /* ROS_DEBUG("trk_%ld: Position: (%f, %f), Orientation: %f, Std Deviation: %f, %f", */
+      /* 		mtrk[i].id, */
+      /* 		mtrk[i].filter->x[0], mtrk[i].filter->x[2], //x, y */
+      /* 		theta, //orientation */
+      /* 		sqrt(mtrk[i].filter->X(0,0)), sqrt(mtrk[i].filter->X(2,2))//std dev */
+      /* 		); */
+      
+      geometry_msgs::Pose pose, vel, var; // position, velocity, variance
+      
+      pose.position.x = mtrk[i].filter->x[0];
+      pose.position.y = mtrk[i].filter->x[2];
+      pose.orientation.z = sin(theta/2);
+      pose.orientation.w = cos(theta/2);
+#ifdef ONLINE_LEARNING
+      if(mtrk[i].detector_name == "object3d_detector")
+	      pose.position.z = std::atoi(mtrk[i].pose_id.c_str());
+      else
+	      pose.position.z = -1.0;
+      //std::cerr << "track ID = " << mtrk[i].id << ", pose ID = " << mtrk[i].pose_id << std::endl;
+#endif
+      result[mtrk[i].id].push_back(pose);
+      
+      vel.position.x = mtrk[i].filter->x[1];
+      vel.position.y = mtrk[i].filter->x[3];
+      result[mtrk[i].id].push_back(vel);
+      
+      var.position.x = mtrk[i].filter->X(0,0);
+      var.position.y = mtrk[i].filter->X(2,2);
+      var.orientation.x = mtrk[i].filter->X(0,2);
+      var.orientation.y = mtrk[i].filter->X(2,0);
+      result[mtrk[i].id].push_back(var);
+    }
+
+    return result;
+  }
+
   double getTime() {
     return ros::Time::now().toSec();
   }

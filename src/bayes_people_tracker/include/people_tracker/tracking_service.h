@@ -55,11 +55,13 @@ public:
     
 private:
     void parseParams(ros::NodeHandle n);
+    void trackingThread();
 
     ros::ServiceServer tracking_service;
     tf::TransformListener* listener;
     std::string target_frame;
     std::string base_link;
+    double tracker_frequency;
     
     SimpleTracking<EKFilter> *ekf = NULL;
     SimpleTracking<UKFilter> *ukf = NULL;

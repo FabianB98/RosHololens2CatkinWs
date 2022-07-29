@@ -18,10 +18,12 @@ TrackingService::TrackingService() {
     ros::NodeHandle private_node_handle("~");
     private_node_handle.param("base_link", base_link, std::string("base_link"));
     private_node_handle.param("target_frame", target_frame, std::string("base_link"));
-
+    private_node_handle.param("tracker_frequency", tracker_frequency, double(30.0));
     parseParams(private_node_handle);
 
     tracking_service = private_node_handle.advertiseService("trackClusters", &TrackingService::trackClustersCallback, this);
+
+    boost::thread tracking_thread(boost::bind(&TrackingService::trackingThread, this));
 
     ros::spin();
 }
@@ -155,6 +157,24 @@ void TrackingService::parseParams(ros::NodeHandle n) {
     }
 }
 
+void TrackingService::trackingThread() {
+  ros::Rate fps(tracker_frequency);
+  
+  while(ros::ok()) {
+    if(ekf == NULL) {
+        if(ukf == NULL) {
+            pf->track();
+        } else {
+            ukf->track();
+        }
+    } else {
+        ekf->track();
+    }
+
+    fps.sleep();
+  }
+}
+
 bool TrackingService::trackClustersCallback(bayes_people_tracker::TrackClusters::Request& req, bayes_people_tracker::TrackClusters::Response& res) {
     try {
         std::vector<std::pair<long, geometry_msgs::Pose> > trackedPoints = trackClusters(req.clusterCenterPoints, req.detectorName);
@@ -177,11 +197,6 @@ std::vector<std::pair<long, geometry_msgs::Pose> > TrackingService::trackCluster
     // Transform everything from the given coordinate systems to the tracking coordinate system.
     geometry_msgs::Pose robotPoseInTargetCoords;
     try {
-        // TODO: This may not be needed.
-        // // Transform into given target frame. Default /map
-        // ROS_DEBUG("Transforming received position into %s coordinate system.", target_frame.c_str());
-        // listener->waitForTransform(clusterCenterPoints.header.frame_id, target_frame, clusterCenterPoints.header.stamp, ros::Duration(1.0));
-
         tf::StampedTransform transform;
         listener->lookupTransform(target_frame, base_link, ros::Time(0), transform);
         robotPoseInTargetCoords.position.x = transform.getOrigin().getX();
@@ -222,14 +237,14 @@ std::vector<std::pair<long, geometry_msgs::Pose> > TrackingService::trackCluster
     if(ekf == NULL) {
         if(ukf == NULL) {
             pf->addObservation(detector, observationsInTrackingCoordinateSystem, clusterCenterPoints.header.stamp.toSec(), robotPoseInTargetCoords);
-            trackedPointsInTrackingCoordinateSystem = pf->track();
+            trackedPointsInTrackingCoordinateSystem = pf->getTrackedObjects();
         } else {
             ukf->addObservation(detector, observationsInTrackingCoordinateSystem, clusterCenterPoints.header.stamp.toSec(), robotPoseInTargetCoords);
-            trackedPointsInTrackingCoordinateSystem = ukf->track();
+            trackedPointsInTrackingCoordinateSystem = ukf->getTrackedObjects();
         }
     } else {
         ekf->addObservation(detector, observationsInTrackingCoordinateSystem, clusterCenterPoints.header.stamp.toSec(), robotPoseInTargetCoords);
-        trackedPointsInTrackingCoordinateSystem = ekf->track();
+        trackedPointsInTrackingCoordinateSystem = ekf->getTrackedObjects();
     }
 
     // Transform everything back from the tracking coordinate system to the given coordinate system.
