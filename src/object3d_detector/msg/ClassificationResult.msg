@@ -1,0 +1,3 @@
+int32 objectClass
+float32 probability
+int64 trackingId

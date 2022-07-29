@@ -8,12 +8,18 @@
 // result in even more code duplication...
 
 
-
+// Standard libraries
+#include <unordered_map>
+#include <vector>
 // ROS
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
+// Parameter parsing
+#include <XmlRpcValue.h>
+// Boost
+#include <boost/circular_buffer.hpp>
 // PCL
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/extract_indices.h>
@@ -30,7 +36,9 @@
 // SVM
 #include "svm.h"
 // Service request and response messages
+#include "object3d_detector/ClassificationResult.h"
 #include "object3d_detector/ClassifyClusters.h"
+#include "bayes_people_tracker/TrackClusters.h"
 
 // A compile time switch which defines whether the individual clusters should be saved to disk. This doesn't need to
 // be a parameter which can be configured over a parameter file, as we only need save some clusters for manual annotation.
@@ -58,22 +66,47 @@ typedef struct feature {
 
 static const int FEATURE_SIZE = 61;
 
+typedef struct classifier {
+  int object_class_id_;
+
+  struct svm_model *svm_model_;
+  bool is_probability_model_;
+  float svm_scale_range_[FEATURE_SIZE][2];
+  float x_lower_;
+  float x_upper_;
+} Classifier;
+
+struct TrackingClassificationInfo {
+  boost::circular_buffer<std::vector<int> > detected_classes_over_time;
+  std::unordered_map<int, int> class_detection_counters;
+  int total_detections;
+
+  TrackingClassificationInfo(int num_frames_to_use, std::vector<int> class_ids) {
+    detected_classes_over_time = boost::circular_buffer<std::vector<int> >(num_frames_to_use);
+
+    for (const auto& class_id : class_ids)
+      class_detection_counters[class_id] = 0;
+    total_detections = 0;
+  }
+
+  TrackingClassificationInfo() = default;
+};
+
 class Object3dDetector {
 private:
   /*** Publishers and Subscribers ***/
   ros::NodeHandle node_handle_;
   ros::ServiceServer classification_service;
+  ros::ServiceClient tracking_service;
   
-  std::string model_file_name_;
-  std::string range_file_name_;
   struct svm_node *svm_node_;
-  struct svm_model *svm_model_;
+  std::vector<int> class_ids_;
+  std::vector<Classifier> classifiers_;
   bool use_svm_model_;
-  bool is_probability_model_;
-  float svm_scale_range_[FEATURE_SIZE][2];
-  float x_lower_;
-  float x_upper_;
-  float human_probability_;
+  float detection_probability_threshold_;
+  int num_frames_to_use_;
+
+  std::unordered_map<long, TrackingClassificationInfo> classification_info_for_tracks;
   
 public:
   Object3dDetector();
@@ -81,62 +114,87 @@ public:
   
   bool classifyClustersCallback(
     object3d_detector::ClassifyClusters::Request& req, object3d_detector::ClassifyClusters::Response& res);
-  std::vector<std::pair<bool, double>> classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters);
+
+  std::vector<std::pair<long, pcl::PointXYZ> > trackClusters(const geometry_msgs::PoseArray& clusterCentroids, Eigen::Matrix4f& hololensToObject3dDetector);
 
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
 		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid);
   void saveFeature(Feature &f, struct svm_node *x);
-  std::vector<std::pair<bool, double>> classify(std::vector<Feature> features);
+  std::vector<std::vector<std::pair<int, float> > > classifyCurrentFrame(std::vector<Feature> features);
+  std::vector<object3d_detector::ClassificationResult> classifyMultiFrames(std::vector<Feature> features,
+          std::vector<std::vector<std::pair<int, float> > > classificationsCurrentFrame, std::vector<std::pair<long, pcl::PointXYZ> > trackedClusters);
 };
 
 Object3dDetector::Object3dDetector() {
+  ros::NodeHandle public_nh;
   ros::NodeHandle private_nh("~");
+
   classification_service = private_nh.advertiseService("classifyClusters", &Object3dDetector::classifyClustersCallback, this);
+  tracking_service = public_nh.serviceClient<bayes_people_tracker::TrackClusters>("clustersTrackerAllClassification/trackClusters");
   
-  /****** load a pre-trained svm model ******/
-  private_nh.param<std::string>("model_file_name", model_file_name_, "");
-  private_nh.param<std::string>("range_file_name", range_file_name_, "");
-  
-  use_svm_model_ = false;
-  if((svm_model_ = svm_load_model(model_file_name_.c_str())) == NULL) {
-    ROS_WARN("[object3d detector] can not load SVM model, use model-free detection.");
-  } else {
-    ROS_INFO("[object3d detector] load SVM model from '%s'.", model_file_name_.c_str());
-    is_probability_model_ = svm_check_probability_model(svm_model_)?true:false;
-    svm_node_ = (struct svm_node *)malloc((FEATURE_SIZE+1)*sizeof(struct svm_node)); // 1 more size for end index (-1)
-    
-    // load range file, for more details: https://github.com/cjlin1/libsvm/
-    std::fstream range_file;
-    range_file.open(range_file_name_.c_str(), std::fstream::in);
-    if(!range_file.is_open()) {
-      ROS_WARN("[object3d detector] can not load range file, use model-free detection.");
+  private_nh.param("detection_probability_threshold_", detection_probability_threshold_, 0.7f);
+  private_nh.param("num_frames_to_use", num_frames_to_use_, 25);
+
+  class_ids_.push_back(0);
+
+  /****** load pre-trained svm models ******/
+  use_svm_model_ = true;
+  svm_node_ = (struct svm_node *)malloc((FEATURE_SIZE+1)*sizeof(struct svm_node)); // 1 more size for end index (-1)
+  XmlRpc::XmlRpcValue classifiers;
+  private_nh.getParam("classifiers", classifiers);
+  ROS_ASSERT(classifiers.getType() == XmlRpc::XmlRpcValue::TypeStruct);
+  for(XmlRpc::XmlRpcValue::ValueStruct::const_iterator it = classifiers.begin(); it != classifiers.end(); ++it) {
+    ROS_INFO_STREAM("Found classifier: " << (std::string)(it->first) << " ==> " << classifiers[it->first]);
+
+    Classifier classifier;
+    classifier.object_class_id_ = classifiers[it->first]["class_id"];
+    class_ids_.push_back(classifier.object_class_id_);
+
+    std::string model_file_name = classifiers[it->first]["model_file"];
+    std::string range_file_name = classifiers[it->first]["range_file"];
+
+    if((classifier.svm_model_ = svm_load_model(model_file_name.c_str())) == NULL) {
+      ROS_WARN("[object3d detector] can not load SVM model, use model-free detection.");
+      use_svm_model_ = false;
     } else {
-      ROS_INFO("[object3d detector] load SVM range from '%s'.", range_file_name_.c_str());
-      std::string line;
-      std::vector<std::string> params;
-      std::getline(range_file, line);
-      std::getline(range_file, line);
-      boost::split(params, line, boost::is_any_of(" "));
-      x_lower_ = atof(params[0].c_str());
-      x_upper_ = atof(params[1].c_str());
-      int i = 0;
-      while(std::getline(range_file, line)) {
+      ROS_INFO("[object3d detector] load SVM model from '%s'.", model_file_name.c_str());
+      classifier.is_probability_model_ = svm_check_probability_model(classifier.svm_model_) ? true : false;
+      
+      // load range file, for more details: https://github.com/cjlin1/libsvm/
+      std::fstream range_file;
+      range_file.open(range_file_name.c_str(), std::fstream::in);
+      if(!range_file.is_open()) {
+        ROS_WARN("[object3d detector] can not load range file, use model-free detection.");
+        use_svm_model_ = false;
+      } else {
+        ROS_INFO("[object3d detector] load SVM range from '%s'.", range_file_name.c_str());
+        std::string line;
+        std::vector<std::string> params;
+        std::getline(range_file, line);
+        std::getline(range_file, line);
         boost::split(params, line, boost::is_any_of(" "));
-        svm_scale_range_[i][0] = atof(params[1].c_str());
-        svm_scale_range_[i][1] = atof(params[2].c_str());
-        i++;
-        //std::cerr << i << " " <<  svm_scale_range_[i][0] << " " << svm_scale_range_[i][1] << std::endl;
+        classifier.x_lower_ = atof(params[0].c_str());
+        classifier.x_upper_ = atof(params[1].c_str());
+        int i = 0;
+        while(std::getline(range_file, line)) {
+          boost::split(params, line, boost::is_any_of(" "));
+          classifier.svm_scale_range_[i][0] = atof(params[1].c_str());
+          classifier.svm_scale_range_[i][1] = atof(params[2].c_str());
+          i++;
+        }
       }
-      use_svm_model_ = true;
     }
+
+    classifiers_.push_back(classifier);
   }
 }
 
 Object3dDetector::~Object3dDetector() {
-  if(use_svm_model_) {
-    svm_free_and_destroy_model(&svm_model_);
-    free(svm_node_);
+  for (size_t i = 0; i < classifiers_.size(); ++i) {
+    if (classifiers_[i].svm_model_ != NULL)
+      svm_free_and_destroy_model(&(classifiers_[i].svm_model_));
   }
+  free(svm_node_);
 }
 
 int counter = 0;
@@ -165,8 +223,7 @@ bool Object3dDetector::classifyClustersCallback(
   hololensToObject3dDetector = sensorPositionToOrigin * hololensToObject3dDetector;
 
   std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters;
-  for (const auto& clusterMsg : req.clusters)
-  {
+  for (const auto& clusterMsg : req.clusters) {
     pcl::PointCloud<pcl::PointXYZI>::Ptr cluster_hololens(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(clusterMsg, *cluster_hololens);
 
@@ -192,21 +249,10 @@ bool Object3dDetector::classifyClustersCallback(
     pcl::io::savePCDFileBinary(prefix + ".pcd", *clustersCombined);
   }
 
-  std::vector<std::pair<bool, double>> classificationResults = classifyClusters(clusters);
-  for (std::pair<bool, double> result : classificationResults)
-  {
-    res.classificationResults.push_back(result.first);
-    res.probabilities.push_back(result.second);
-  }
+  std::vector<std::pair<long, pcl::PointXYZ> > trackedClusters = trackClusters(req.clusterCentroids, hololensToObject3dDetector);
 
-  return true;
-}
-
-std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters)
-{
   std::vector<Feature> features;
-  for (const auto& cluster : clusters)
-  {
+  for (const auto& cluster : clusters) {
     Eigen::Vector4f min, max, centroid;
     pcl::getMinMax3D(*cluster, min, max);
     pcl::compute3DCentroid(*cluster, centroid);
@@ -216,7 +262,37 @@ std::vector<std::pair<bool, double>> Object3dDetector::classifyClusters(std::vec
     features.push_back(f);
   }
 
-  return classify(features);
+  std::vector<std::vector<std::pair<int, float> > > classificationsCurrentFrame = classifyCurrentFrame(features);
+  res.classificationResults = classifyMultiFrames(features, classificationsCurrentFrame, trackedClusters);
+  return true;
+}
+
+std::vector<std::pair<long, pcl::PointXYZ> > Object3dDetector::trackClusters(const geometry_msgs::PoseArray& clusterCentroids, Eigen::Matrix4f& hololensToObject3dDetector) {
+  bayes_people_tracker::TrackClusters clusterTrackingMsg;
+  clusterTrackingMsg.request.detectorName = "clusters_classifier";
+  clusterTrackingMsg.request.clusterCenterPoints = clusterCentroids;
+  bool trackingSuccess = tracking_service.call(clusterTrackingMsg);
+
+  std::vector<std::pair<long, pcl::PointXYZ> > trackedPoints;
+
+  if (trackingSuccess) {
+    Eigen::Affine3f hololensToObject3dDetectorAffine;
+    hololensToObject3dDetectorAffine.matrix() = hololensToObject3dDetector;
+
+    for (size_t i = 0; i < clusterTrackingMsg.response.trackIds.size(); ++i) {
+      const auto& trackId = clusterTrackingMsg.response.trackIds[i];
+      const auto& pose = clusterTrackingMsg.response.trackedPoints[i];
+
+      pcl::PointXYZ trackedPoint (pose.position.x, pose.position.y, pose.position.z);
+      pcl::PointXYZ trackedPointTransformed = pcl::transformPoint(trackedPoint, hololensToObject3dDetectorAffine);
+      
+      trackedPoints.push_back(std::make_pair(trackId, trackedPointTransformed));
+    }
+  } else {
+    ROS_WARN("Cluster tracking failed! Falling back to classifying clusters solely with information from the current frame...");
+  }
+
+  return trackedPoints;
 }
 
 /* *** Feature Extraction ***
@@ -465,39 +541,145 @@ void Object3dDetector::saveFeature(Feature &f, struct svm_node *x) {
   //   std::cerr << std::endl;
   // }
 }
-  
-std::vector<std::pair<bool, double>> Object3dDetector::classify(std::vector<Feature> features) {
-  std::vector<std::pair<bool, double>> classificationResults;
+
+
+std::vector<std::vector<std::pair<int, float> > > Object3dDetector::classifyCurrentFrame(std::vector<Feature> features) {
+  std::vector<std::vector<std::pair<int, float> > > classificationResults;
 
   for(std::vector<Feature>::iterator it = features.begin(); it != features.end(); ++it) {
+    std::vector<std::pair<int, float> > classificationsCurrentCluster;
+    
     if(use_svm_model_) {
-      saveFeature(*it, svm_node_);
-      //std::cerr << "test_id = " << it->id << ", number_points = " << it->number_points << ", min_distance = " << it->min_distance << std::endl;
+      float largestProbability = 0.0f;
+      for (size_t i = 0; i < classifiers_.size(); ++i) {
+        Classifier& classifier = classifiers_[i];
+      
+        saveFeature(*it, svm_node_);
 
-      // scale data
-      for(int i = 0; i < FEATURE_SIZE; i++) {
-      	if(svm_scale_range_[i][0] == svm_scale_range_[i][1]) // skip single-valued attribute
-      	  continue;
-      	if(svm_node_[i].value == svm_scale_range_[i][0])
-      	  svm_node_[i].value = x_lower_;
-      	else if(svm_node_[i].value == svm_scale_range_[i][1])
-      	  svm_node_[i].value = x_upper_;
-      	else
-      	  svm_node_[i].value = x_lower_ + (x_upper_ - x_lower_) * (svm_node_[i].value - svm_scale_range_[i][0]) / (svm_scale_range_[i][1] - svm_scale_range_[i][0]);
+        // scale data
+        for(int i = 0; i < FEATURE_SIZE; i++) {
+          if(classifier.svm_scale_range_[i][0] == classifier.svm_scale_range_[i][1]) // skip single-valued attribute
+            continue;
+          if(svm_node_[i].value == classifier.svm_scale_range_[i][0])
+            svm_node_[i].value = classifier.x_lower_;
+          else if(svm_node_[i].value == classifier.svm_scale_range_[i][1])
+            svm_node_[i].value = classifier.x_upper_;
+          else
+            svm_node_[i].value = classifier.x_lower_ + (classifier.x_upper_ - classifier.x_lower_) * (svm_node_[i].value - classifier.svm_scale_range_[i][0]) / (classifier.svm_scale_range_[i][1] - classifier.svm_scale_range_[i][0]);
+        }
+
+        // predict
+        if(classifier.is_probability_model_) {
+          double prob_estimates[classifier.svm_model_->nr_class];
+          svm_predict_probability(classifier.svm_model_, svm_node_, prob_estimates);
+          bool classified = prob_estimates[0] >= detection_probability_threshold_;
+          if (classified) {
+            classificationsCurrentCluster.push_back(std::make_pair(classifier.object_class_id_, prob_estimates[0]));
+          }
+          largestProbability = std::max(largestProbability, static_cast<float>(prob_estimates[0]));
+        } else {
+          bool classified = svm_predict(classifier.svm_model_, svm_node_) == 1;
+          if (classified) {
+            classificationsCurrentCluster.push_back(std::make_pair(classifier.object_class_id_, 1.0f));
+            largestProbability = std::max(largestProbability, 1.0f);
+          }
+        }
       }
 
-      // predict
-      if(is_probability_model_) {
-	      double prob_estimates[svm_model_->nr_class];
-      	svm_predict_probability(svm_model_, svm_node_, prob_estimates);
-        classificationResults.push_back(std::make_pair(prob_estimates[0] >= human_probability_, prob_estimates[0]));
+      if (classificationsCurrentCluster.size() == 0)
+        classificationsCurrentCluster.push_back(std::make_pair(0, 1.0f - largestProbability));
+    } else {
+      // Can't predict any classes as we're not using the SVM due to some error during startup...
+      classificationsCurrentCluster.push_back(std::make_pair(-1, 0.0f));
+    }
+
+    classificationResults.push_back(classificationsCurrentCluster);
+  }
+
+  return classificationResults;
+}
+  
+std::vector<object3d_detector::ClassificationResult> Object3dDetector::classifyMultiFrames(std::vector<Feature> features, 
+    std::vector<std::vector<std::pair<int, float> > > classificationsCurrentFrame, std::vector<std::pair<long, pcl::PointXYZ> > trackedClusters)
+{
+  std::vector<object3d_detector::ClassificationResult> classificationResults;
+
+  for(size_t i = 0; i < features.size(); ++i) {
+    Feature& feature = features[i];
+
+    object3d_detector::ClassificationResult result;
+    result.objectClass = 0;
+    result.probability = 0.0;
+    result.trackingId = -1;
+
+    for(const auto& trackedCluster : trackedClusters) {
+      // The tracker doesn't track along the height, meaning the tracked points all have a z-value of zero, so their
+      // z-value can't be compared with the z-value of the cluster centroid.
+      float dX = feature.centroid.x() - trackedCluster.second.x;
+      float dY = feature.centroid.y() - trackedCluster.second.y;
+      float squaredDistance = dX * dX + dY * dY;
+      if (squaredDistance <= 0.1 * 0.1) {
+        result.trackingId = trackedCluster.first;
+        break;
+      }
+    }
+
+    if(use_svm_model_) {
+      std::vector<std::pair<int, float> >& clusterClassifications = classificationsCurrentFrame[i];
+
+      if (result.trackingId == -1) {
+        // We don't have any tracking information about the current cluster, so we have to classify it solely based on
+        // the classifications made in this frame.
+        for (const auto& classification : clusterClassifications) {
+          if (classification.second > result.probability) {
+            result.objectClass = classification.first;
+            result.probability = classification.second;
+          }
+        }
       } else {
-        bool classified = svm_predict(svm_model_, svm_node_) == 1;
-        classificationResults.push_back(std::make_pair(classified, classified ? 1.0 : 0.0));
+        if (classification_info_for_tracks.find(result.trackingId) == classification_info_for_tracks.end()) {
+          classification_info_for_tracks[result.trackingId] = TrackingClassificationInfo(num_frames_to_use_, class_ids_);
+        }
+        TrackingClassificationInfo& trackingClassificationInfo = classification_info_for_tracks[result.trackingId];
+
+        // Remove information for frames which are too far in the past.
+        if (trackingClassificationInfo.detected_classes_over_time.full()) {
+          for (const auto& classId : trackingClassificationInfo.detected_classes_over_time.front()) {
+            trackingClassificationInfo.class_detection_counters[classId]--;
+          }
+          trackingClassificationInfo.total_detections -= trackingClassificationInfo.detected_classes_over_time.front().size();
+          trackingClassificationInfo.detected_classes_over_time.pop_front();
+        }
+
+        // Add information about the current frame.
+        std::vector<int> detectedClassesThisFrame;
+        for (const auto& classification : clusterClassifications) {
+          const int& classId = classification.first;
+          detectedClassesThisFrame.push_back(classId);
+          trackingClassificationInfo.class_detection_counters[classId]++;
+        }
+        trackingClassificationInfo.detected_classes_over_time.push_back(detectedClassesThisFrame);
+        trackingClassificationInfo.total_detections += detectedClassesThisFrame.size();
+
+        // Determine the class which was detected the most amount within the last frames.
+        int greatestCount = 0;
+        for (const auto& detectionCounter : trackingClassificationInfo.class_detection_counters) {
+          const int& classId = detectionCounter.first;
+          const int& detectionCount = detectionCounter.second;
+
+          if (detectionCount > greatestCount) {
+            result.objectClass = classId;
+            greatestCount = detectionCount;
+          }
+        }
+        result.probability = static_cast<float>(greatestCount) / static_cast<float>(trackingClassificationInfo.total_detections);
       }
     } else {
-      classificationResults.push_back(std::make_pair(false, 0.0));
+      // Can't predict any classes as we're not using the SVM due to some error during startup...
+      result.objectClass = -1;
     }
+
+    classificationResults.push_back(result);
   }
 
   return classificationResults;

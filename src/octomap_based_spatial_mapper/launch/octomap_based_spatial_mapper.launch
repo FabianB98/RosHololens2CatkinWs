@@ -4,12 +4,15 @@
     <rosparam file="$(find octomap_based_spatial_mapper)/config/lower_computational_load.yaml"/>
     <node name="octomap_based_spatial_mapper" pkg="octomap_based_spatial_mapper" type="octomap_based_spatial_mapper" respawn="true"/>
 
+    <include file="$(find object3d_detector)/launch/object3d_detector_srv.launch"/>
+
     <rosparam command="load" file="$(find octomap_based_spatial_mapper)/config/object_tracking_config.yaml"/>
+    <!--
     <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerAll" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
-    <!--
+    -->
     <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerHuman" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
@@ -18,26 +21,10 @@
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
+    <!--
     <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerUnknown" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
     -->
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker_srv" name="clustersTrackerAllClassification" respawn="true">
-        <param name="base_link" type="string" value="map"/>
-        <param name="target_frame" type="string" value="map"/>
-    </node>
-
-    <node pkg="object3d_detector" type="object3d_detector_srv" name="clustersClassifierHuman" respawn="true">
-        <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.model"/>
-        <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/pedestrian_hololens.range"/>
-
-        <param name="human_probability" type="double" value="0.7"/>
-    </node>
-    <node pkg="object3d_detector" type="object3d_detector_srv" name="clustersClassifierRobot" respawn="true">
-        <param name="model_file_name" type="string" value="$(find object3d_detector)/libsvm/robot_hololens.model"/>
-        <param name="range_file_name" type="string" value="$(find object3d_detector)/libsvm/robot_hololens.range"/>
-
-        <param name="human_probability" type="double" value="0.7"/>
-    </node>
 </launch>

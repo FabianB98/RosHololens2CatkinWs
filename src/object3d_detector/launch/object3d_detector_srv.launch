@@ -1,0 +1,10 @@
+<launch>
+    <rosparam command="load" file="$(find object3d_detector)/config/object3d_detector_srv.yaml" subst_value="true"/>
+
+    <node pkg="object3d_detector" type="object3d_detector_srv" name="clustersClassifier" respawn="true"/>
+
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker_srv" name="clustersTrackerAllClassification" respawn="true">
+        <param name="base_link" type="string" value="map"/>
+        <param name="target_frame" type="string" value="map"/>
+    </node>
+</launch>

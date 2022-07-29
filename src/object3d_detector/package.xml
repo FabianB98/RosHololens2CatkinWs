@@ -15,6 +15,7 @@
   <build_depend>pcl_conversions</build_depend>
   <build_depend>pcl_ros</build_depend>
   <build_depend>bayes_tracking</build_depend>
+  <build_depend>bayes_people_tracker</build_depend>
   <build_depend>hololens_depth_data_receiver_msgs</build_depend>
   <build_depend>message_generation</build_depend>
   
@@ -25,6 +26,7 @@
   <run_depend>pcl_conversions</run_depend>
   <run_depend>pcl_ros</run_depend>
   <run_depend>bayes_tracking</run_depend>
+  <run_depend>bayes_people_tracker</run_depend>
   <run_depend>hololens_depth_data_receiver_msgs</run_depend>
   <run_depend>message_runtime</run_depend>
 </package>

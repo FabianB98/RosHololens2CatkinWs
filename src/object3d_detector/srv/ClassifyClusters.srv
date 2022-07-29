@@ -1,5 +1,5 @@
 sensor_msgs/PointCloud2[] clusters
+geometry_msgs/PoseArray clusterCentroids
 geometry_msgs/Point sensorPosition
 ---
-bool[] classificationResults
-float32[] probabilities
+ClassificationResult[] classificationResults

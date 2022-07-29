@@ -123,10 +123,10 @@ struct BoundingBox
 
 enum ClusterClass
 {
-    HUMAN,
-    ROBOT,
-    UNKNOWN,
-    CLASSIFICATION_FAILED
+    CLASSIFICATION_FAILED = -1,
+    UNKNOWN = 0,
+    HUMAN = 1,
+    ROBOT = 2
 };
 
 namespace std
@@ -332,9 +332,7 @@ private:
     std::unordered_map<ClusterClass, std_msgs::ColorRGBA> objectClassColors;
 
     // ROS publishers and service clients.
-    ros::ServiceClient humanClassifierService;
-    ros::ServiceClient robotClassifierService;
-    ros::ServiceClient clusterTrackingService;
+    ros::ServiceClient clusterClassifierService;
     ros::Publisher octomapCurrentFramePublisher;
     ros::Publisher octomapStaticObjectsPublisher;
     ros::Publisher octomapDynamicObjectsPublisher;

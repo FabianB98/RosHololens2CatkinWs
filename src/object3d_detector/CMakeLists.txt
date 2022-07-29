@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   pcl_conversions
   pcl_ros
   bayes_tracking
+  bayes_people_tracker
   hololens_depth_data_receiver_msgs
   message_generation
 )
@@ -18,6 +19,11 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(PCL REQUIRED)
 
 include_directories(include ${catkin_INCLUDE_DIRS})
+
+add_message_files(
+  FILES
+  ClassificationResult.msg
+)
 
 add_service_files(
   FILES

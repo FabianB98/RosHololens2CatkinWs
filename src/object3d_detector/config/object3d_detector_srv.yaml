@@ -1,0 +1,30 @@
+# Configuration for the classifier
+clustersClassifier:
+    detection_probability_threshold: 0.7         # The minimum probability which must be returned by the SVM for a cluster to be classified as belonging to this class
+    num_frames_to_use: 25                        # The amount of frames to consider when determining the class of a tracked object.
+    classifiers:                                 # Add classifiers under this namespace
+        human:                                   # Name of classifier (used internally to identify them). Has to be unique.
+            class_id: 1                          # ID of the class which should be returned if a cluster was identified as belonging to this class.
+            model_file: "$(find object3d_detector)/libsvm/pedestrian_hololens.model"    # Path to the model file.
+            range_file: "$(find object3d_detector)/libsvm/pedestrian_hololens.range"    # Path to the range file.
+        robot:
+            class_id: 2
+            model_file: "$(find object3d_detector)/libsvm/robot_hololens.model"
+            range_file: "$(find object3d_detector)/libsvm/robot_hololens.range"
+
+# Configuration for the tracker
+clustersTrackerAllClassification:
+    filter_type: "UKF"                           # The Kalman filter type: EKF = Extended Kalman Filter, UKF = Uncented Kalman Filter
+    cv_noise_params:                             # The noise for the constant velocity prediction model
+        x: 1.4
+        y: 1.4
+        std_limit: 1.0                           # upper limit for the standard deviation of the estimated position 
+    detectors:                                   # Add detectors under this namespace
+        clusters_classifier:                     # Name of detector (used internally to identify them). Has to be unique.
+            observation_model: "CARTESIAN"       # Observation model: CARTESIAN or POLAR
+            noise_params:                        # The noise for the cartesian or polar observation model
+                x: 0.1
+                y: 0.1
+            matching_algorithm: "NN"             # The algorthim to match different detections. NN = Nearest Neighbour, NNJPDA = NN Joint Probability Data Association
+            seq_size: 4                          # Minimum number of observations for new track creation
+            seq_time: 0.3                        # Minimum interval between observations for new track creation
