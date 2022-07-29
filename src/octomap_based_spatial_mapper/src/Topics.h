@@ -9,6 +9,7 @@
 #define BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC "boundingBoxDynamicObjectClusters"
 
 #define DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC "dynamicClusterCentroidsAll"
+#define DYNAMIC_CLUSTER_CENTROIDS_CLUSTERS_OF_INTEREST_TOPIC "dynamicClusterCentroidsClustersOfInterest"
 #define DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC "dynamicClusterCentroidsHuman"
 #define DYNAMIC_CLUSTER_CENTROIDS_ROBOT_TOPIC "dynamicClusterCentroidsRobot"
 #define DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC "dynamicClusterCentroidsUnknown"

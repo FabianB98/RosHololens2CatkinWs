@@ -266,6 +266,12 @@ private:
         const std::vector<ClusterClass>& clusterClasses,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
+    void publishBoundingBoxes(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<size_t>& indices,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp);
 
     // Publishes the given centroids as a geometry_msgs::PoseArray.
     void publishCentroids(
@@ -338,10 +344,7 @@ private:
     ros::Publisher octomapDynamicObjectsPublisher;
     ros::Publisher octomapDynamicObjectClustersPublisher;
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
-    ros::Publisher dynamicClusterCentroidsAllPublisher;
-    ros::Publisher dynamicClusterCentroidsHumanPublisher;
-    ros::Publisher dynamicClusterCentroidsRobotPublisher;
-    ros::Publisher dynamicClusterCentroidsUnknownPublisher;
+    ros::Publisher dynamicClusterCentroidsPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

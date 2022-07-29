@@ -137,10 +137,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     octomapDynamicObjectsPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_TOPIC, 10);
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
     boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
-    dynamicClusterCentroidsAllPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_ALL_TOPIC, 10);
-    dynamicClusterCentroidsHumanPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_HUMAN_TOPIC, 10);
-    dynamicClusterCentroidsRobotPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_ROBOT_TOPIC, 10);
-    dynamicClusterCentroidsUnknownPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC, 10);
+    dynamicClusterCentroidsPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_CLUSTERS_OF_INTEREST_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -273,10 +270,16 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     // Classify each cluster.
     std::vector<ClusterClass> clusterClasses = classifyVoxelClusters(clusterPointClouds,
             clusterCentroids, msg->hololensPosition.point);
-    std::vector<size_t> clusterIndicesHuman = selectClustersByClass(clusterClasses, {ClusterClass::HUMAN});
-    std::vector<size_t> clusterIndicesRobot = selectClustersByClass(clusterClasses, {ClusterClass::ROBOT});
+    std::vector<size_t> clusterIndicesClustersOfInterest = selectClustersByClass(clusterClasses, 
+            {ClusterClass::HUMAN, ClusterClass::ROBOT});
     std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(clusterClasses,
             {ClusterClass::UNKNOWN, ClusterClass::CLASSIFICATION_FAILED});
+
+    // TODO: Clusters which were classified as corresponding to the unknown/background object class, could be checked
+    // if they are somewhat stationary. In case they are determined to be not moving (or only slightly jittering around
+    // some point in space), these clusters could correspond to static objects which were falsely removed from the
+    // spatial map of static objects, so that it may be useful to add them back to the spatial map of static objects. It
+    // may be useful to test the benefits and drawbacks of doing so.
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -289,11 +292,9 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
-    publishBoundingBoxes(boundingBoxes, clusterClasses, boundingBoxDynamicObjectClustersPublisher, time);
-    publishCentroids(clusterCentroids, dynamicClusterCentroidsAllPublisher, time);
-    publishCentroids(clusterCentroids, clusterIndicesHuman, dynamicClusterCentroidsHumanPublisher, time);
-    publishCentroids(clusterCentroids, clusterIndicesRobot, dynamicClusterCentroidsRobotPublisher, time);
-    publishCentroids(clusterCentroids, clusterIndicesUnknown, dynamicClusterCentroidsUnknownPublisher, time);
+    publishBoundingBoxes(boundingBoxes, clusterClasses, clusterIndicesClustersOfInterest,
+            boundingBoxDynamicObjectClustersPublisher, time);
+    publishCentroids(clusterCentroids, clusterIndicesClustersOfInterest, dynamicClusterCentroidsPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -1109,14 +1110,30 @@ void SpatialMapper::publishBoundingBoxes(
         ros::Publisher& publisher,
         const ros::Time& timestamp)
 {
-    if (boundingBoxes.size() == 0)
+    std::vector<size_t> indices;
+    for (size_t i = 0; i < boundingBoxes.size(); i++)
+    {
+        indices.push_back(i);
+    }
+
+    publishBoundingBoxes(boundingBoxes, clusterClasses, indices, publisher, timestamp);
+}
+
+void SpatialMapper::publishBoundingBoxes(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<size_t>& indices,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp)
+{
+    if (indices.size() == 0)
         return;
 
     visualization_msgs::MarkerArray markers;
 
-    for (int i = 0; i < boundingBoxes.size(); i++)
+    for (const auto& index : indices)
     {
-        const BoundingBox& boundingBox = boundingBoxes[i];
+        const BoundingBox& boundingBox = boundingBoxes[index];
 
         // The following blocks of code used to generate the marker points are somewhat copied (and slightly modified)
         // from object3d_detector (published in Yan2020online / https://github.com/yzrobot/online_learning)
@@ -1126,7 +1143,7 @@ void SpatialMapper::publishBoundingBoxes(
         marker.header.frame_id = "hololens_world";
 
         marker.ns = "octomap_based_object_detection";
-        marker.id = i;
+        marker.id = index;
         marker.type = visualization_msgs::Marker::LINE_LIST;
         marker.action = 0;
 
@@ -1159,7 +1176,7 @@ void SpatialMapper::publishBoundingBoxes(
         for(int i = 0; i < 24; i++)
             marker.points.push_back(p[i]);
 
-        marker.color = objectClassColors[clusterClasses[i]];
+        marker.color = objectClassColors[clusterClasses[index]];
 
         // Contrary to what one would assume, this does not scale the points along the x-axis. Instead, it defines the
         // width to use when rendering the lines. A value of 0.02 therefore indicates that a line should have a width of

@@ -7,24 +7,8 @@
     <include file="$(find object3d_detector)/launch/object3d_detector_srv.launch"/>
 
     <rosparam command="load" file="$(find octomap_based_spatial_mapper)/config/object_tracking_config.yaml"/>
-    <!--
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerAll" respawn="true">
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerClustersOfInterest" respawn="true">
         <param name="base_link" type="string" value="map"/>
         <param name="target_frame" type="string" value="map"/>
     </node>
-    -->
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerHuman" respawn="true">
-        <param name="base_link" type="string" value="map"/>
-        <param name="target_frame" type="string" value="map"/>
-    </node>
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerRobot" respawn="true">
-        <param name="base_link" type="string" value="map"/>
-        <param name="target_frame" type="string" value="map"/>
-    </node>
-    <!--
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="clustersTrackerUnknown" respawn="true">
-        <param name="base_link" type="string" value="map"/>
-        <param name="target_frame" type="string" value="map"/>
-    </node>
-    -->
 </launch>

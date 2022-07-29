@@ -34,6 +34,25 @@ clustersTrackerAllClassification:
             seq_size: 4
             seq_time: 0.3
 
+# This object tracker tracks all clusters of interest (i.e. clusters which were classified as being a human or a robot).
+clustersTrackerClustersOfInterest:
+    filter_type: "UKF"
+    cv_noise_params:
+        x: 1.4
+        y: 1.4
+        std_limit: 1.0
+    detectors:
+        octomap_based_spatial_mapper:
+            topic: "/dynamicClusterCentroidsClustersOfInterest"
+            observation_model: "CARTESIAN"
+            noise_params:
+                x: 0.1
+                y: 0.1
+            matching_algorithm: "NN"
+            seq_size: 4
+            seq_time: 0.3
+
+
 # This object tracker tracks only clusters classified as being a human.
 clustersTrackerHuman:
     filter_type: "UKF"
