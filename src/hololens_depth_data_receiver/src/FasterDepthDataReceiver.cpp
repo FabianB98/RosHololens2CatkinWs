@@ -293,21 +293,6 @@ void FasterDepthDataReceiver::handleDepthFrame(
     pcl::transformPointCloud(*pointCloudCamSpace, *pointCloudWorldSpace, camToWorld);
     pcl::transformPointCloud(*artificialEndpointsCamSpace, *artificialEndpointsWorldSpace, camToWorld);
 
-    // Create a point cloud containing the artificial endpoints of all pixels in the depth map which are too far away
-    // from the depth sensor.
-    // Please note that this depth data receiver does NOT compute any artificial endpoints (contrary to the initial
-    // depth data receiver) as tests made using the initial depth data receiver have shown that generating artificial
-    // endpoints is in fact not helpful at all (at least when using the depth sensor of the HoloLens 2). As the depth
-    // sensor employed by the HoloLens 2 can't differentiate between points too far away from the sensor and points too
-    // close in front in front of the sensor, the generated artificial endpoints would therefore sometimes falsely
-    // indicate that there is more free space than there is in reality (which caused for voxels to be falsely removed
-    // from the spatial map in the octomap based spatial mapper). It was therefore chosen to leave the calculation of
-    // artificial endpoints out in this depth data receiver which in term also saves some time.
-    // The initialization of an empty point cloud and the conversion to a ROS message is only here for the purpose of
-    // not crashing ROS nodes (i.e. the octomap based spatial mapper at the time of writing this comment) which listen
-    // to published point cloud frame messages and try to access their artificial endpoints.
-    // pcl::PointCloud<pcl::PointXYZI>::Ptr artificialEndpointsWorldSpace (new pcl::PointCloud<pcl::PointXYZI>());
-
     // Publish the depth map, the HoloLens's current position and the computed point cloud.
     ros::Time time = ros::Time::now();
     sensor_msgs::PointCloud2 pointCloudWorldSpaceMsg;
