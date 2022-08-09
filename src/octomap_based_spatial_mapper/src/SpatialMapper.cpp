@@ -217,7 +217,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     }
 
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
-    VoxelClassificationResult classificiationResult = updateSpatialMapThisFrame 
+    VoxelClassificationResult classificationResult = updateSpatialMapThisFrame
             ? classifyVoxelsWithSpatialMapUpdate(currentFrameOctree)
             : classifyVoxelsWithoutSpatialMapUpdate(currentFrameOctree);
     octomap::OcTree* dynamicObjectsOctree;
@@ -227,18 +227,18 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
         // be part of the floor or some noise above the floor.
         if (updateSpatialMapThisFrame)
         {
-            updateFloorHeight(classificiationResult.staticVoxelCenterPoints);
-            updateFloorHeight(classificiationResult.dynamicVoxelCenterPoints);
+            updateFloorHeight(classificationResult.staticVoxelCenterPoints);
+            updateFloorHeight(classificationResult.dynamicVoxelCenterPoints);
         }
 
-        std::vector<octomap::point3d> dynamicVoxels = removeFloorVoxels(classificiationResult.dynamicVoxelCenterPoints);
+        std::vector<octomap::point3d> dynamicVoxels = removeFloorVoxels(classificationResult.dynamicVoxelCenterPoints);
         dynamicObjectsOctree = voxelCenterPointsToOctree(dynamicVoxels);
     }
     else
     {
         // Potential floor voxels should not be removed. The octree containing all dynamic voxels can directly be
         // created from the dynamic voxel center points without any additional removal of certain voxels.
-        dynamicObjectsOctree = voxelCenterPointsToOctree(classificiationResult.dynamicVoxelCenterPoints);
+        dynamicObjectsOctree = voxelCenterPointsToOctree(classificationResult.dynamicVoxelCenterPoints);
     }
 
     // Cluster all dynamic voxels.
