@@ -6,7 +6,7 @@
 octomapLeafSize: 0.05
 octreeInsertionLazyEval: false
 octreeInsertionDiscretize: false
-octreeInsertionUseArtificialEndpoints: false
+octreeInsertionUseArtificialEndpoints: false # Enabling this feature will bring up more issues than it helps solve (at least when using the HoloLens 2's depth sensor).
 
 # Switches and hyper parameters for octree freespace filtering.
 doOctreeFreespaceFiltering: true
@@ -29,4 +29,10 @@ voxelClusteringMinClusterSize: 8  # With a leaf size of 5 cm each voxel holds a 
 doNoiseClusterRemoval: true
 noiseClusterRemovalRelativeNeighborDistance: 1.0
 noiseClusterRemovalStaticNeighborPercentage: 0.75
-noiseClusterRemovalAddNoiseClustersToStaticMap: true
+noiseClusterRemovalAddNoiseClustersToStaticMap: false # Enabling this feature will cause issues with slow moving objects.
+
+# Switches and hyper parameters for adding mostly static objects of the unknown/background object class to the map of static objects.
+doMostlyStaticObjectSearchAndInsertion: true
+mostlyStaticObjectSearchMinProbability: 0.9
+mostlyStaticObjectSearchNumTrackedFramesToUse: 25
+mostlyStaticObjectSearchMaxAverageMovementDistance: 0.25

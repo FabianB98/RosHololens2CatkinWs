@@ -119,6 +119,13 @@ struct BoundingBox
         center.getArray3fMap() = (min.getArray3fMap() + max.getArray3fMap()) / 2.0f;
         return center;
     }
+
+    pcl::PointXYZ getDimensions() const
+    {
+        pcl::PointXYZ dimensions;
+        dimensions.getArray3fMap() = max.getArray3fMap() - min.getArray3fMap();
+        return dimensions;
+    }
 };
 
 enum ObjectClass
@@ -143,6 +150,33 @@ struct ClassificationResult
         objectClass = _objectClass;
         probability = _probability;
         trackingId = _trackingId;
+    }
+};
+
+struct TrajectoryInformation
+{
+    std::vector<pcl::PointXYZ> trackedCentroidPositions;
+    BoundingBox centroidPositionsBoundingBox;
+
+    TrajectoryInformation() {}
+
+    TrajectoryInformation(const pcl::PointXYZ& centroidPosition)
+    {
+        trackedCentroidPositions.push_back(centroidPosition);
+        centroidPositionsBoundingBox = BoundingBox(centroidPosition, centroidPosition);
+    }
+
+    void addCentroidPosition(const pcl::PointXYZ& centroidPosition)
+    {
+        trackedCentroidPositions.push_back(centroidPosition);
+
+        centroidPositionsBoundingBox.min.x = std::min(centroidPositionsBoundingBox.min.x, centroidPosition.x);
+        centroidPositionsBoundingBox.min.y = std::min(centroidPositionsBoundingBox.min.y, centroidPosition.y);
+        centroidPositionsBoundingBox.min.z = std::min(centroidPositionsBoundingBox.min.z, centroidPosition.z);
+
+        centroidPositionsBoundingBox.max.x = std::max(centroidPositionsBoundingBox.max.x, centroidPosition.x);
+        centroidPositionsBoundingBox.max.y = std::max(centroidPositionsBoundingBox.max.y, centroidPosition.y);
+        centroidPositionsBoundingBox.max.z = std::max(centroidPositionsBoundingBox.max.z, centroidPosition.z);
     }
 };
 
@@ -265,6 +299,12 @@ private:
     std::vector<size_t> selectClustersByClass(
         const std::vector<ClassificationResult>& clusterClasses,
         const std::unordered_set<ObjectClass>& classesToSelect);
+    
+    std::vector<size_t> selectMostlyStaticObjects(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<pcl::PointXYZ>& clusterCentroids,
+        const std::vector<ClassificationResult>& classificationResults,
+        const std::vector<size_t>& indices);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
@@ -338,6 +378,12 @@ private:
     std::vector<octomap::point3d> noiseClusterRemovalNeighborhood;
     bool noiseClusterRemovalAddNoiseClustersToStaticMap;
 
+    // Switches and hyper parameters for adding mostly static objects of the unknown/background class to the static map.
+    bool doMostlyStaticObjectSearchAndInsertion;
+    double mostlyStaticObjectSearchMinProbability;
+    int mostlyStaticObjectSearchNumTrackedFramesToUse;
+    double mostlyStaticObjectSearchMaxAverageMovementDistance;
+
     // The octree storing information about the global spatial map.
     octomap::OcTree* staticObjectsOctree;
     bool updateSpatialMap = true;
@@ -352,9 +398,10 @@ private:
     // The currently estimated floor height.
     float floorHeight = 10000.0;
 
-    // Information about the class of tracked objects and a map of the colors to assign to the detected object classes.
-    std::unordered_map<long, boost::circular_buffer<std::vector<ObjectClass>>> objectClassDetectionsPrevFrames;
-    std::unordered_map<long, std::unordered_map<ObjectClass, int>> objectClassDetectionCounts;
+    // Information about the tracked trajectories of unknown/background objects.
+    std::unordered_map<int64_t, TrajectoryInformation> trackedTrajectories;
+
+    // The colors to assign to the detected object classes.
     std::unordered_map<ObjectClass, std_msgs::ColorRGBA> objectClassColors;
 
     // ROS publishers and service clients.

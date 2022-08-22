@@ -35,6 +35,12 @@
 #define NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE 0.75       // How many voxels of the cluster must have a static neighbor.
 #define NOISE_CLUSTER_REMOVAL_ADD_NOISE_CLUSTERS_TO_STATIC_MAP true // Should noise clusters be added to the spatial map of static objects?
 
+// Switches and hyper parameters for adding mostly static objects of the unknown/background class to the static map.
+#define DO_MOSTLY_STATIC_OBJECT_SEARCH_AND_INSERTION true           // Should this feature be enabled?
+#define MOSTLY_STATIC_OBJECT_SEARCH_MIN_PROBABILITY 0.9             // The min probability of the object being of class unknown/background.
+#define MOSTLY_STATIC_OBJECT_SEARCH_NUM_TRACKED_FRAMES_TO_USE 25    // The frames to use for determining whether the object is moving.
+#define MOSTLY_STATIC_OBJECT_SEARCH_MAX_AVG_MOVEMENT_DISTANCE 0.25  // The maximum average movement for an object to be classified as static.
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 //                                                                                                                    //
 //                                              ACTUAL CODE STARTS HERE                                               //
@@ -64,6 +70,10 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     n.param("noiseClusterRemovalStaticNeighborPercentage", noiseClusterRemovalStaticNeighborPercentage, NOISE_CLUSTER_REMOVAL_STATIC_NEIGHBOR_PERCENTAGE);
     noiseClusterRemovalNoStaticNeighborPercentage = 1.0 - noiseClusterRemovalStaticNeighborPercentage;
     n.param("noiseClusterRemovalAddNoiseClustersToStaticMap", noiseClusterRemovalAddNoiseClustersToStaticMap, NOISE_CLUSTER_REMOVAL_ADD_NOISE_CLUSTERS_TO_STATIC_MAP);
+    n.param("doMostlyStaticObjectSearchAndInsertion", doMostlyStaticObjectSearchAndInsertion, DO_MOSTLY_STATIC_OBJECT_SEARCH_AND_INSERTION);
+    n.param("mostlyStaticObjectSearchMinProbability", mostlyStaticObjectSearchMinProbability, MOSTLY_STATIC_OBJECT_SEARCH_MIN_PROBABILITY);
+    n.param("mostlyStaticObjectSearchNumTrackedFramesToUse", mostlyStaticObjectSearchNumTrackedFramesToUse, MOSTLY_STATIC_OBJECT_SEARCH_NUM_TRACKED_FRAMES_TO_USE);
+    n.param("mostlyStaticObjectSearchMaxAverageMovementDistance", mostlyStaticObjectSearchMaxAverageMovementDistance, MOSTLY_STATIC_OBJECT_SEARCH_MAX_AVG_MOVEMENT_DISTANCE);
 
     // Initialize the array of the neighborhoods to check when filtering voxels and when clustering voxels.
     octreeFilteringNeighborhood = initializeEuclideanDistanceNeighborhood(octreeFilteringRelativeNeighborDistance);
@@ -275,11 +285,14 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(classificationResults,
             {ObjectClass::UNKNOWN, ObjectClass::CLASSIFICATION_FAILED});
 
-    // TODO: Clusters which were classified as corresponding to the unknown/background object class could be checked
-    // if they are somewhat stationary. In case they are determined to be not moving (or only slightly jittering around
-    // some point in space), these clusters could correspond to static objects which were falsely removed from the
-    // spatial map of static objects, so that it may be useful to add them back to the spatial map of static objects. It
-    // may be useful to test the benefits and drawbacks of doing so.
+    // Check which objects classified as corresponding to the unknown/background object class didn't move too much. Such
+    // objects may be considered as being static, so they can be added to the spatial map of static objects.
+    if (doMostlyStaticObjectSearchAndInsertion && updateSpatialMapThisFrame)
+    {
+        std::vector<size_t> clusterIndicesUnknownMostlyStatic = selectMostlyStaticObjects(
+                boundingBoxes, clusterCentroids, classificationResults, clusterIndicesUnknown);
+        addClustersToStaticObjectsMap(dynamicObjectClusters, clusterIndicesUnknownMostlyStatic);
+    }
 
     // Prune all previously expanded octrees in order to save space when publishing these octrees.
     currentFrameOctree->prune();
@@ -1119,6 +1132,70 @@ std::vector<size_t> SpatialMapper::selectClustersByClass(
     }
 
     return indices;
+}
+
+std::vector<size_t> SpatialMapper::selectMostlyStaticObjects(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<pcl::PointXYZ>& clusterCentroids,
+        const std::vector<ClassificationResult>& classificationResults,
+        const std::vector<size_t>& indices)
+{
+    std::vector<size_t> resultingIndices;
+
+    for (const auto& index : indices)
+    {
+        const BoundingBox& boundingBox = boundingBoxes[index];
+        const pcl::PointXYZ& clusterCentroid = clusterCentroids[index];
+        const ClassificationResult& classificationResult = classificationResults[index];
+        
+        // We can only determine whether an object is mostly static when we have tracking information about that object.
+        if (classificationResult.trackingId < 0)
+            continue;
+        
+        auto search = trackedTrajectories.find(classificationResult.trackingId);
+        if (search == trackedTrajectories.end())
+        {
+            // This appears to be the first time we have seen this object being tracked, so we don't have enough
+            // information about the object's trajectory yet...
+            trackedTrajectories[classificationResult.trackingId] = TrajectoryInformation(clusterCentroid);
+            continue;
+        }
+
+        TrajectoryInformation& trajectoryInformation = search->second;
+        trajectoryInformation.addCentroidPosition(clusterCentroid);
+
+        if (classificationResult.probability < mostlyStaticObjectSearchMinProbability)
+            continue;
+
+        // We can only determine whether an object is static when we have enough tracking information about that object.
+        size_t numTrackedFrames = trajectoryInformation.trackedCentroidPositions.size();
+        if (numTrackedFrames < mostlyStaticObjectSearchNumTrackedFramesToUse)
+            continue;
+        
+        // An object is considered as being mostly static if its centroid didn't move around too much.
+        pcl::PointCloud<pcl::PointXYZ> centroidPositionsCloud = pcl::PointCloud<pcl::PointXYZ>();
+        for (size_t i = numTrackedFrames - mostlyStaticObjectSearchNumTrackedFramesToUse; i < numTrackedFrames; i++)
+            centroidPositionsCloud.push_back(trajectoryInformation.trackedCentroidPositions[i]);
+        Eigen::Vector4f centroidOfCentroidPositions;
+        pcl::compute3DCentroid(centroidPositionsCloud, centroidOfCentroidPositions);
+
+        double averageDistanceBetweenTrackedPositionsAndCentroid = 0.0;
+        for (size_t i = numTrackedFrames - mostlyStaticObjectSearchNumTrackedFramesToUse; i < numTrackedFrames; i++)
+        {
+            double diffX = centroidOfCentroidPositions.x() - trajectoryInformation.trackedCentroidPositions[i].x;
+            double diffY = centroidOfCentroidPositions.y() - trajectoryInformation.trackedCentroidPositions[i].y;
+            double diffZ = centroidOfCentroidPositions.z() - trajectoryInformation.trackedCentroidPositions[i].z;
+            averageDistanceBetweenTrackedPositionsAndCentroid += sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ);
+        }
+        averageDistanceBetweenTrackedPositionsAndCentroid /= mostlyStaticObjectSearchNumTrackedFramesToUse;
+
+        if (averageDistanceBetweenTrackedPositionsAndCentroid > mostlyStaticObjectSearchMaxAverageMovementDistance)
+            continue;
+
+        resultingIndices.push_back(index);
+    }
+
+    return resultingIndices;
 }
 
 void SpatialMapper::publishBoundingBoxes(
