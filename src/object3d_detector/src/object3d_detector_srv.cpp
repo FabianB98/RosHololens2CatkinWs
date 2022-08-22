@@ -1,10 +1,11 @@
 // This file was not part of the repository published at https://github.com/yzrobot/online_learning. It was added as
-// part of my work to be able to use the human classifier from other ROS nodes by the use of a service.
+// part of my work to be able to use multiple SVMs (such as the human classifier) to classify between multiple classes
+// of objects and to be able to use these classifiers from other ROS nodes by the use of a service.
 // Please note that my original intent was to also get rid of the code duplications found between object_3d_detector.cpp
 // and object_3d_detector_ol.cpp, but upon further inspection I had to find that there are sometimes subtle differences
 // between methods of the same name found in these two files. As I don't have the time to perform a complete refactoring
 // of these two files, I decided to copy the code from object3d_detector.cpp and use that as a starting point for my
-// modifications to make the human classifier run as a service. It should however be noted that this will definitely 
+// modifications to make the classifiers run as a service. It should however be noted that this will definitely 
 // result in even more code duplication...
 
 
@@ -39,6 +40,8 @@
 #include "object3d_detector/ClassificationResult.h"
 #include "object3d_detector/ClassifyClusters.h"
 #include "bayes_people_tracker/TrackClusters.h"
+// Point cloud frame message (contains point cloud and sensor position).
+#include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 
 // A compile time switch which defines whether the individual clusters should be saved to disk. This doesn't need to
 // be a parameter which can be configured over a parameter file, as we only need save some clusters for manual annotation.
@@ -96,9 +99,21 @@ class Object3dDetector {
 private:
   /*** Publishers and Subscribers ***/
   ros::NodeHandle node_handle_;
+  ros::Subscriber point_cloud_sub_;
+  ros::Publisher pose_array_pub_;
+  ros::Publisher marker_array_pub_;
   ros::ServiceServer classification_service;
   ros::ServiceClient tracking_service;
   
+  std::string frame_id_;
+  float floor_height;
+  float ceiling_height;
+  float floor_ceiling_update_threshold;
+  float floor_ceiling_noise_threshold;
+  int min_points_in_floor_ceiling;
+  int cluster_size_min_;
+  int cluster_size_max_;
+
   struct svm_node *svm_node_;
   std::vector<int> class_ids_;
   std::vector<Classifier> classifiers_;
@@ -107,16 +122,22 @@ private:
   int num_frames_to_use_;
 
   std::unordered_map<long, TrackingClassificationInfo> classification_info_for_tracks;
+
+  std::unordered_map<int32_t, std_msgs::ColorRGBA> objectClassColors;
   
 public:
   Object3dDetector();
   ~Object3dDetector();
   
+  void pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg);
+
   bool classifyClustersCallback(
     object3d_detector::ClassifyClusters::Request& req, object3d_detector::ClassifyClusters::Response& res);
 
   std::vector<std::pair<long, pcl::PointXYZ> > trackClusters(const geometry_msgs::PoseArray& clusterCentroids, Eigen::Matrix4f& hololensToObject3dDetector);
 
+  std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc);
+  std::vector<Feature> extractFeatures(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters);
   void extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, Feature &f,
 		      Eigen::Vector4f &min, Eigen::Vector4f &max, Eigen::Vector4f &centroid);
   void saveFeature(Feature &f, struct svm_node *x);
@@ -129,9 +150,24 @@ Object3dDetector::Object3dDetector() {
   ros::NodeHandle public_nh;
   ros::NodeHandle private_nh("~");
 
+  bool subscribeToHoloLensPointCloud = false;
+  private_nh.param("subscribeToHoloLensPointCloud", subscribeToHoloLensPointCloud, false);
+  if (subscribeToHoloLensPointCloud) {
+    point_cloud_sub_ = public_nh.subscribe<hololens_depth_data_receiver_msgs::PointCloudFrame>("hololensLongThrowPointCloudFrame", 1, &Object3dDetector::pointCloudCallback, this);
+    
+    marker_array_pub_ = private_nh.advertise<visualization_msgs::MarkerArray>("markers", 100);
+    pose_array_pub_ = private_nh.advertise<geometry_msgs::PoseArray>("poses", 100);
+  }
+
   classification_service = private_nh.advertiseService("classifyClusters", &Object3dDetector::classifyClustersCallback, this);
   tracking_service = public_nh.serviceClient<bayes_people_tracker::TrackClusters>("clustersTrackerAllClassification/trackClusters");
   
+  private_nh.param<std::string>("frame_id", frame_id_, "odom");
+  private_nh.param<float>("floor_ceiling_update_threshold", floor_ceiling_update_threshold, 0.15);
+  private_nh.param<float>("floor_ceiling_noise_threshold", floor_ceiling_noise_threshold, 0.1);
+  private_nh.param<int>("min_points_in_floor_ceiling", min_points_in_floor_ceiling, 5000);
+  private_nh.param<int>("cluster_size_min", cluster_size_min_, 5);
+  private_nh.param<int>("cluster_size_max", cluster_size_max_, 30000);
   private_nh.param("detection_probability_threshold_", detection_probability_threshold_, 0.7f);
   private_nh.param("num_frames_to_use", num_frames_to_use_, 25);
 
@@ -187,6 +223,35 @@ Object3dDetector::Object3dDetector() {
 
     classifiers_.push_back(classifier);
   }
+
+  // Define the colors to use for visualizing the detected object class.
+  std_msgs::ColorRGBA humanColor;
+  humanColor.r = 0.0;
+  humanColor.g = 1.0;
+  humanColor.b = 0.5;
+  humanColor.a = 1.0;
+  objectClassColors[1] = humanColor;
+
+  std_msgs::ColorRGBA robotColor;
+  robotColor.r = 1.0;
+  robotColor.g = 0.5;
+  robotColor.b = 0.0;
+  robotColor.a = 1.0;
+  objectClassColors[2] = robotColor;
+
+  std_msgs::ColorRGBA unknownColor;
+  unknownColor.r = 0.5;
+  unknownColor.g = 0.5;
+  unknownColor.b = 0.5;
+  unknownColor.a = 1.0;
+  objectClassColors[0] = unknownColor;
+
+  std_msgs::ColorRGBA classificationFailedColor;
+  classificationFailedColor.r = 0.0;
+  classificationFailedColor.g = 0.0;
+  classificationFailedColor.b = 0.0;
+  classificationFailedColor.a = 1.0;
+  objectClassColors[-1] = classificationFailedColor;
 }
 
 Object3dDetector::~Object3dDetector() {
@@ -250,18 +315,7 @@ bool Object3dDetector::classifyClustersCallback(
   }
 
   std::vector<std::pair<long, pcl::PointXYZ> > trackedClusters = trackClusters(req.clusterCentroids, hololensToObject3dDetector);
-
-  std::vector<Feature> features;
-  for (const auto& cluster : clusters) {
-    Eigen::Vector4f min, max, centroid;
-    pcl::getMinMax3D(*cluster, min, max);
-    pcl::compute3DCentroid(*cluster, centroid);
-
-    Feature f;
-    extractFeature(cluster, f, min, max, centroid);
-    features.push_back(f);
-  }
-
+  std::vector<Feature> features = extractFeatures(clusters);
   std::vector<std::vector<std::pair<int, float> > > classificationsCurrentFrame = classifyCurrentFrame(features);
   res.classificationResults = classifyMultiFrames(features, classificationsCurrentFrame, trackedClusters);
   return true;
@@ -293,6 +347,264 @@ std::vector<std::pair<long, pcl::PointXYZ> > Object3dDetector::trackClusters(con
   }
 
   return trackedPoints;
+}
+
+int64_t clusterCentroidsSequenceNumber = 0;
+void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msgs::PointCloudFrame::ConstPtr& msg) {
+  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc_hololens(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::fromROSMsg(msg->pointCloudWorldSpace, *pcl_pc_hololens);
+
+  // The HoloLens uses a slightly different coordinate system. Up corresponds to the y-axis instead of the z-axis.
+  // We need to transform the point cloud accordingly such that the coordinate systems match up.
+  Eigen::Matrix4f hololensToObject3dDetector = Eigen::Matrix4f::Identity();
+  hololensToObject3dDetector.block(0, 0, 3, 3) = Eigen::AngleAxisf(1.5707963f, Eigen::Vector3f::UnitX()).toRotationMatrix();
+
+  // The same applies to the sensor position which also needs to be rotated accordingly.
+  pcl::PointXYZ sensor_position
+      = pcl::PointXYZ(msg->hololensPosition.point.x, -msg->hololensPosition.point.z, msg->hololensPosition.point.y);
+
+  // For classification the points need to be in a coordinate system relative to the sensor position (i.e. a coordinate
+  // system in which the sensor is located at the origin), so we need to translate all points accordingly.
+  // Please note that it is technically not quite correct to only translate along the XY plane, but not along the Z axis
+  // (i.e. the height). However, if the point cloud was also translated along the height axis, this would cause the
+  // floor and ceiling detection to break. It was therefore chosen to only translate the points along the XY plane. This
+  // also has the benefit of the saved point clouds being easier to annotate as the floor and ceiling threshold can be
+  // kept constant instead of needing to be adjusted every so often (depending on how much the HoloLens is moved in
+  // height).
+  Eigen::Vector4f sensorTranslation(sensor_position.x, sensor_position.y, 0.0f, 0.0f);
+  Eigen::Matrix4f sensorPositionToOrigin
+      = Eigen::Affine3f(Eigen::Translation3f(-sensor_position.x, -sensor_position.y, 0)).matrix();
+  hololensToObject3dDetector = sensorPositionToOrigin * hololensToObject3dDetector;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr pcl_pc (new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::transformPointCloud(*pcl_pc_hololens, *pcl_pc, hololensToObject3dDetector);
+  
+  std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters = extractCluster(pcl_pc);
+  std::vector<Feature> features = extractFeatures(clusters);
+
+  geometry_msgs::PoseArray clusterCentroids;
+  clusterCentroids.header.seq = clusterCentroidsSequenceNumber++;
+  clusterCentroids.header.stamp = msg->hololensPosition.header.stamp;
+  clusterCentroids.header.frame_id = frame_id_;
+  for (const auto& feature : features) {
+    geometry_msgs::Pose pose;
+    pose.position.x = feature.centroid.x();
+    pose.position.y = feature.centroid.y();
+    pose.position.z = feature.centroid.z();
+    pose.orientation.w = 1.0;
+
+    clusterCentroids.poses.push_back(pose);
+  }
+  std::vector<std::pair<long, pcl::PointXYZ> > trackedClusters = trackClusters(clusterCentroids, hololensToObject3dDetector);
+  
+  std::vector<std::vector<std::pair<int, float> > > classificationsCurrentFrame = classifyCurrentFrame(features);
+  std::vector<object3d_detector::ClassificationResult> classificationsMultiFrame = classifyMultiFrames(features, classificationsCurrentFrame, trackedClusters);
+
+  visualization_msgs::MarkerArray marker_array;
+  geometry_msgs::PoseArray pose_array;
+  for (size_t i = 0; i < classificationsMultiFrame.size(); i++)
+  {
+    const Feature& feature = features[i];
+    const object3d_detector::ClassificationResult& classificationResult = classificationsMultiFrame[i];
+
+    if (classificationResult.objectClass <= 0)
+      continue;
+
+    // TODO: Min, max and centroid need to be moved transformed back into the original coordinate system.
+
+    visualization_msgs::Marker marker;
+    marker.header.stamp = ros::Time::now();
+    marker.header.frame_id = frame_id_;
+    marker.ns = "object3d";
+    marker.id = i;
+    marker.type = visualization_msgs::Marker::LINE_LIST;
+    geometry_msgs::Point p[24];
+    p[0].x = feature.max[0]; p[0].y = feature.max[1]; p[0].z = feature.max[2];
+    p[1].x = feature.min[0]; p[1].y = feature.max[1]; p[1].z = feature.max[2];
+    p[2].x = feature.max[0]; p[2].y = feature.max[1]; p[2].z = feature.max[2];
+    p[3].x = feature.max[0]; p[3].y = feature.min[1]; p[3].z = feature.max[2];
+    p[4].x = feature.max[0]; p[4].y = feature.max[1]; p[4].z = feature.max[2];
+    p[5].x = feature.max[0]; p[5].y = feature.max[1]; p[5].z = feature.min[2];
+    p[6].x = feature.min[0]; p[6].y = feature.min[1]; p[6].z = feature.min[2];
+    p[7].x = feature.max[0]; p[7].y = feature.min[1]; p[7].z = feature.min[2];
+    p[8].x = feature.min[0]; p[8].y = feature.min[1]; p[8].z = feature.min[2];
+    p[9].x = feature.min[0]; p[9].y = feature.max[1]; p[9].z = feature.min[2];
+    p[10].x = feature.min[0]; p[10].y = feature.min[1]; p[10].z = feature.min[2];
+    p[11].x = feature.min[0]; p[11].y = feature.min[1]; p[11].z = feature.max[2];
+    p[12].x = feature.min[0]; p[12].y = feature.max[1]; p[12].z = feature.max[2];
+    p[13].x = feature.min[0]; p[13].y = feature.max[1]; p[13].z = feature.min[2];
+    p[14].x = feature.min[0]; p[14].y = feature.max[1]; p[14].z = feature.max[2];
+    p[15].x = feature.min[0]; p[15].y = feature.min[1]; p[15].z = feature.max[2];
+    p[16].x = feature.max[0]; p[16].y = feature.min[1]; p[16].z = feature.max[2];
+    p[17].x = feature.max[0]; p[17].y = feature.min[1]; p[17].z = feature.min[2];
+    p[18].x = feature.max[0]; p[18].y = feature.min[1]; p[18].z = feature.max[2];
+    p[19].x = feature.min[0]; p[19].y = feature.min[1]; p[19].z = feature.max[2];
+    p[20].x = feature.max[0]; p[20].y = feature.max[1]; p[20].z = feature.min[2];
+    p[21].x = feature.min[0]; p[21].y = feature.max[1]; p[21].z = feature.min[2];
+    p[22].x = feature.max[0]; p[22].y = feature.max[1]; p[22].z = feature.min[2];
+    p[23].x = feature.max[0]; p[23].y = feature.min[1]; p[23].z = feature.min[2];
+    for(int i = 0; i < 24; i++)
+      marker.points.push_back(p[i]);
+    marker.scale.x = 0.02;
+    marker.color = objectClassColors[classificationResult.objectClass];
+    
+    marker.lifetime = ros::Duration(0.25);
+    marker_array.markers.push_back(marker);
+    
+    geometry_msgs::Pose pose;
+    pose.position.x = feature.centroid[0];
+    pose.position.y = feature.centroid[1];
+    pose.position.z = feature.centroid[2];
+    pose.orientation.w = 1;
+    pose_array.poses.push_back(pose);
+  }
+
+  if(marker_array.markers.size()) {
+    marker_array_pub_.publish(marker_array);
+  }
+  if(pose_array.poses.size()) {
+    pose_array.header.stamp = ros::Time::now();
+    pose_array.header.frame_id = frame_id_;
+    pose_array_pub_.publish(pose_array);
+  }
+}
+
+const int nested_regions_ = 14;
+int zone_[nested_regions_] = {2,3,3,3,3,3,3,2,3,3,3,3,3,3}; // for more details, see our IROS'17 paper.
+std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> Object3dDetector::extractCluster(pcl::PointCloud<pcl::PointXYZI>::Ptr pc) {
+  float min_z_in_frame = 0.0;
+  float max_z_in_frame = 0.0;
+  for (int i = 0; i < pc->size(); i++) {
+    float point_height = (*pc)[i].z;
+    min_z_in_frame = std::min(point_height, min_z_in_frame);
+    max_z_in_frame = std::max(point_height, max_z_in_frame);
+  }
+
+  if (min_z_in_frame < floor_height - floor_ceiling_update_threshold) {
+    // There are points more than 15 cm below the currently assumed floor height. Check for a plane at that height.
+    pcl::IndicesPtr point_indices_below_floor_height(new std::vector<int>);
+    pcl::PassThrough<pcl::PointXYZI> pass;
+    pass.setInputCloud(pc);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(min_z_in_frame - floor_ceiling_noise_threshold, floor_height - floor_ceiling_noise_threshold);
+    pass.filter(*point_indices_below_floor_height);
+
+    if (point_indices_below_floor_height->size() >= min_points_in_floor_ceiling) {
+      pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+      pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+      pcl::SACSegmentation<pcl::PointXYZI> seg;
+      seg.setOptimizeCoefficients(true);
+      seg.setMethodType(pcl::SAC_RANSAC);
+      seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+      seg.setDistanceThreshold(0.01);
+      seg.setAxis(Eigen::Vector3f::UnitZ());
+      seg.setEpsAngle(pcl::deg2rad(5.0));
+      seg.setMaxIterations(1000);
+      seg.setInputCloud(pc);
+      seg.setIndices(point_indices_below_floor_height);
+      seg.segment(*inliers, *coefficients);
+
+      if (inliers->indices.size() >= min_points_in_floor_ceiling) {
+        float plane_height = -coefficients->values[2] * coefficients->values[3]; // = -z * d
+        float new_floor_height = plane_height + floor_ceiling_noise_threshold;
+        if (new_floor_height < floor_height) {
+          floor_height = new_floor_height;
+          ROS_INFO("Updated floor height to %f", floor_height);
+        }
+      }
+    }
+  }
+
+  if (max_z_in_frame > ceiling_height + floor_ceiling_update_threshold) {
+    // There are points more than 15 cm above the currently assumed ceiling height. Check for a plane at that height.
+    pcl::IndicesPtr point_indices_above_ceiling_height(new std::vector<int>);
+    pcl::PassThrough<pcl::PointXYZI> pass;
+    pass.setInputCloud(pc);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(ceiling_height + floor_ceiling_noise_threshold, max_z_in_frame + floor_ceiling_noise_threshold);
+    pass.filter(*point_indices_above_ceiling_height);
+
+    if (point_indices_above_ceiling_height->size() >= min_points_in_floor_ceiling) {
+      pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+      pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+      pcl::SACSegmentation<pcl::PointXYZI> seg;
+      seg.setOptimizeCoefficients(true);
+      seg.setMethodType(pcl::SAC_RANSAC);
+      seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+      seg.setDistanceThreshold(0.01);
+      seg.setAxis(Eigen::Vector3f::UnitZ());
+      seg.setEpsAngle(pcl::deg2rad(5.0));
+      seg.setMaxIterations(1000);
+      seg.setInputCloud(pc);
+      seg.setIndices(point_indices_above_ceiling_height);
+      seg.segment(*inliers, *coefficients);
+
+      if (inliers->indices.size() >= min_points_in_floor_ceiling) {
+        float plane_height = -coefficients->values[2] * coefficients->values[3]; // = -z * d
+        float new_ceiling_height = plane_height - floor_ceiling_noise_threshold;
+        if (new_ceiling_height > ceiling_height) {
+          ceiling_height = new_ceiling_height;
+          ROS_INFO("Updated ceiling height to %f", ceiling_height);
+        }
+      }
+    }
+  }
+
+  pcl::IndicesPtr pc_indices(new std::vector<int>);
+  pcl::PassThrough<pcl::PointXYZI> pass;
+  pass.setInputCloud(pc);
+  pass.setFilterFieldName("z");
+  pass.setFilterLimits(floor_height, ceiling_height);
+  pass.filter(*pc_indices);
+  
+  boost::array<std::vector<int>, nested_regions_> indices_array;
+  for(int i = 0; i < pc_indices->size(); i++) {
+    float range = 0.0;
+    for(int j = 0; j < nested_regions_; j++) {
+      float d2 = pc->points[(*pc_indices)[i]].x * pc->points[(*pc_indices)[i]].x +
+	      pc->points[(*pc_indices)[i]].y * pc->points[(*pc_indices)[i]].y +
+	      pc->points[(*pc_indices)[i]].z * pc->points[(*pc_indices)[i]].z;
+      if(d2 > range*range && d2 <= (range+zone_[j])*(range+zone_[j])) {
+      	indices_array[j].push_back((*pc_indices)[i]);
+      	break;
+      }
+      range += zone_[j];
+    }
+  }
+  
+  std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters;
+
+  float tolerance = 0.0;
+  for(int i = 0; i < nested_regions_; i++) {
+    tolerance += 0.1;
+    if(indices_array[i].size() > cluster_size_min_) {
+      boost::shared_ptr<std::vector<int> > indices_array_ptr(new std::vector<int>(indices_array[i]));
+      pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>);
+      tree->setInputCloud(pc, indices_array_ptr);
+      
+      std::vector<pcl::PointIndices> cluster_indices;
+      pcl::EuclideanClusterExtraction<pcl::PointXYZI> ec;
+      ec.setClusterTolerance(tolerance);
+      ec.setMinClusterSize(cluster_size_min_);
+      ec.setMaxClusterSize(cluster_size_max_);
+      ec.setSearchMethod(tree);
+      ec.setInputCloud(pc);
+      ec.setIndices(indices_array_ptr);
+      ec.extract(cluster_indices);
+      
+      for(std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); it++) {
+      	pcl::PointCloud<pcl::PointXYZI>::Ptr cluster(new pcl::PointCloud<pcl::PointXYZI>);
+      	for(std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
+      	  cluster->points.push_back(pc->points[*pit]);
+      	cluster->width = cluster->size();
+      	cluster->height = 1;
+      	cluster->is_dense = true;
+
+        clusters.push_back(cluster);
+      }
+    }
+  }
+
+  return clusters;
 }
 
 /* *** Feature Extraction ***
@@ -497,6 +809,21 @@ void Object3dDetector::extractFeature(pcl::PointCloud<pcl::PointXYZI>::Ptr pc, F
     // f9
     computeIntensity(pc, 25, f.intensity);
   }
+}
+
+std::vector<Feature> Object3dDetector::extractFeatures(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusters) {
+  std::vector<Feature> features;
+  for (const auto& cluster : clusters) {
+    Eigen::Vector4f min, max, centroid;
+    pcl::getMinMax3D(*cluster, min, max);
+    pcl::compute3DCentroid(*cluster, centroid);
+
+    Feature f;
+    extractFeature(cluster, f, min, max, centroid);
+    features.push_back(f);
+  }
+
+  return features;
 }
 
 void Object3dDetector::saveFeature(Feature &f, struct svm_node *x) {
