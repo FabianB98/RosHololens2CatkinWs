@@ -102,28 +102,28 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     humanColor.g = 1.0;
     humanColor.b = 0.5;
     humanColor.a = 1.0;
-    objectClassColors[ClusterClass::HUMAN] = humanColor;
+    objectClassColors[ObjectClass::HUMAN] = humanColor;
 
     std_msgs::ColorRGBA robotColor;
     robotColor.r = 1.0;
     robotColor.g = 0.5;
     robotColor.b = 0.0;
     robotColor.a = 1.0;
-    objectClassColors[ClusterClass::ROBOT] = robotColor;
+    objectClassColors[ObjectClass::ROBOT] = robotColor;
 
     std_msgs::ColorRGBA unknownColor;
     unknownColor.r = 0.5;
     unknownColor.g = 0.5;
     unknownColor.b = 0.5;
     unknownColor.a = 1.0;
-    objectClassColors[ClusterClass::UNKNOWN] = unknownColor;
+    objectClassColors[ObjectClass::UNKNOWN] = unknownColor;
 
     std_msgs::ColorRGBA classificationFailedColor;
     classificationFailedColor.r = 0.0;
     classificationFailedColor.g = 0.0;
     classificationFailedColor.b = 0.0;
     classificationFailedColor.a = 1.0;
-    objectClassColors[ClusterClass::CLASSIFICATION_FAILED] = classificationFailedColor;
+    objectClassColors[ObjectClass::CLASSIFICATION_FAILED] = classificationFailedColor;
 
     // Initialize the global spatial map.
     staticObjectsOctree = new octomap::OcTree(leafSize);
@@ -217,7 +217,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     }
 
     // Register the new octree to the global spatial map and detect all dynamic changes in the scene.
-    VoxelClassificationResult classificationResult = updateSpatialMapThisFrame
+    VoxelClassificationResult classificationResult = updateSpatialMapThisFrame 
             ? classifyVoxelsWithSpatialMapUpdate(currentFrameOctree)
             : classifyVoxelsWithoutSpatialMapUpdate(currentFrameOctree);
     octomap::OcTree* dynamicObjectsOctree;
@@ -268,14 +268,14 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     std::vector<pcl::PointXYZ> clusterCentroids = calculateCentroids(clusterPointClouds);
 
     // Classify each cluster.
-    std::vector<ClusterClass> clusterClasses = classifyVoxelClusters(clusterPointClouds,
+    std::vector<ClassificationResult> classificationResults = classifyVoxelClusters(clusterPointClouds,
             clusterCentroids, msg->hololensPosition.point);
-    std::vector<size_t> clusterIndicesClustersOfInterest = selectClustersByClass(clusterClasses, 
-            {ClusterClass::HUMAN, ClusterClass::ROBOT});
-    std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(clusterClasses,
-            {ClusterClass::UNKNOWN, ClusterClass::CLASSIFICATION_FAILED});
+    std::vector<size_t> clusterIndicesClustersOfInterest = selectClustersByClass(classificationResults, 
+            {ObjectClass::HUMAN, ObjectClass::ROBOT});
+    std::vector<size_t> clusterIndicesUnknown = selectClustersByClass(classificationResults,
+            {ObjectClass::UNKNOWN, ObjectClass::CLASSIFICATION_FAILED});
 
-    // TODO: Clusters which were classified as corresponding to the unknown/background object class, could be checked
+    // TODO: Clusters which were classified as corresponding to the unknown/background object class could be checked
     // if they are somewhat stationary. In case they are determined to be not moving (or only slightly jittering around
     // some point in space), these clusters could correspond to static objects which were falsely removed from the
     // spatial map of static objects, so that it may be useful to add them back to the spatial map of static objects. It
@@ -292,7 +292,7 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishOctree(staticObjectsOctree, octomapStaticObjectsPublisher, time);
     publishOctree(dynamicObjectsOctree, octomapDynamicObjectsPublisher, time);
     publishOctree(dynamicObjectClustersOctree, octomapDynamicObjectClustersPublisher, time);
-    publishBoundingBoxes(boundingBoxes, clusterClasses, clusterIndicesClustersOfInterest,
+    publishBoundingBoxes(boundingBoxes, classificationResults, clusterIndicesClustersOfInterest,
             boundingBoxDynamicObjectClustersPublisher, time);
     publishCentroids(clusterCentroids, clusterIndicesClustersOfInterest, dynamicClusterCentroidsPublisher, time);
 
@@ -317,7 +317,7 @@ octomap::OcTree* SpatialMapper::pointCloudFrameToOctree(
             octreeInsertionDiscretize);
 
     // Use the artificial endpoints as additional information about free space, in case this is wanted.
-    // Please note that using artifical endpoints is not recommended for the HoloLens 2, as this will bring up more
+    // Please note that using artificial endpoints is not recommended for the HoloLens 2, as this will bring up more
     // issues than it helps solve. While the depth sensor embedded into the HoloLens 2 distinguishes between a multiple
     // reasons why a depth value is invalid (one of them being the measured object being too far away), it may sometimes
     // fail to determine the correct invalidation reason, such that depth values may be declared as being too far away
@@ -643,13 +643,13 @@ VoxelClassificationResult SpatialMapper::classifyVoxelsWithoutSpatialMapUpdate(o
     return result;
 }
 
-void SpatialMapper::updateFloorHeight(std::vector<octomap::point3d> voxelCenterPoints)
+void SpatialMapper::updateFloorHeight(const std::vector<octomap::point3d>& voxelCenterPoints)
 {
     // Check if there is a voxel which is lower than the currently assumed floor height.
     float potentialNewFloorHeight = floorHeight;
     for (auto it = voxelCenterPoints.begin(); it != voxelCenterPoints.end(); it++)
     {
-        float& voxelHeight = it->y();
+        const float& voxelHeight = it->y();
         if (voxelHeight < floorHeight)
         {
             potentialNewFloorHeight = voxelHeight;
@@ -668,7 +668,7 @@ void SpatialMapper::updateFloorHeight(std::vector<octomap::point3d> voxelCenterP
 
         for (auto it = voxelCenterPoints.begin(); it != voxelCenterPoints.end(); it++)
         {
-            float& voxelHeight = it->y();
+            const float& voxelHeight = it->y();
             if (voxelHeight < rejectionHeightLower)
             {
                 numVoxelsInPotentialNewFloorHeight++;
@@ -691,13 +691,13 @@ void SpatialMapper::updateFloorHeight(std::vector<octomap::point3d> voxelCenterP
     }
 }
 
-std::vector<octomap::point3d> SpatialMapper::removeFloorVoxels(std::vector<octomap::point3d> voxelCenterPointsToFilter)
+std::vector<octomap::point3d> SpatialMapper::removeFloorVoxels(const std::vector<octomap::point3d>& voxelCenterPointsToFilter)
 {
     std::vector<octomap::point3d> nonFloorVoxels;
     float floorVoxelHeight = floorHeight + leafSize * floorRemovalRelativeNoiseHeight + 1e-6;
     for (auto it = voxelCenterPointsToFilter.begin(); it != voxelCenterPointsToFilter.end(); it++)
     {
-        float& voxelHeight = it->y();
+        const float& voxelHeight = it->y();
         if (voxelHeight > floorVoxelHeight)
         {
             nonFloorVoxels.push_back(*it);
@@ -715,7 +715,7 @@ std::vector<octomap::point3d> SpatialMapper::removeFloorVoxels(std::vector<octom
     }
 }
 
-octomap::OcTree* SpatialMapper::voxelCenterPointsToOctree(std::vector<octomap::point3d> voxelCenterPoints)
+octomap::OcTree* SpatialMapper::voxelCenterPointsToOctree(const std::vector<octomap::point3d>& voxelCenterPoints)
 {
     octomap::OcTree* resultingOctree = new octomap::OcTree(leafSize);
 
@@ -810,7 +810,7 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::detectVoxelClusters(oc
 }
 
 std::vector<std::vector<octomap::point3d>> SpatialMapper::removeSmallVoxelClusters(
-        std::vector<std::vector<octomap::point3d>> voxelClustersToFilter)
+        const std::vector<std::vector<octomap::point3d>>& voxelClustersToFilter)
 {
     std::vector<std::vector<octomap::point3d>> filteredClusters;
 
@@ -826,7 +826,7 @@ std::vector<std::vector<octomap::point3d>> SpatialMapper::removeSmallVoxelCluste
 }
 
 std::pair<std::vector<std::vector<octomap::point3d>>, std::vector<std::vector<octomap::point3d>>>
-        SpatialMapper::removeNoiseVoxelClusters(std::vector<std::vector<octomap::point3d>> voxelClustersToFilter)
+        SpatialMapper::removeNoiseVoxelClusters(const std::vector<std::vector<octomap::point3d>>& voxelClustersToFilter)
 {
     std::vector<std::vector<octomap::point3d>> objectClusters;
     std::vector<std::vector<octomap::point3d>> noiseClusters;
@@ -907,13 +907,26 @@ std::pair<std::vector<std::vector<octomap::point3d>>, std::vector<std::vector<oc
     return std::make_pair(objectClusters, noiseClusters);
 }
 
-void SpatialMapper::addClustersToStaticObjectsMap(std::vector<std::vector<octomap::point3d>> voxelClustersToAdd)
+void SpatialMapper::addClustersToStaticObjectsMap(const std::vector<std::vector<octomap::point3d>>& voxelClustersToAdd)
+{
+    std::vector<size_t> indices;
+    for (size_t i = 0; i < voxelClustersToAdd.size(); i++)
+    {
+        indices.push_back(i);
+    }
+
+    addClustersToStaticObjectsMap(voxelClustersToAdd, indices);
+}
+
+void SpatialMapper::addClustersToStaticObjectsMap(
+        const std::vector<std::vector<octomap::point3d>>& clusters, const std::vector<size_t>& indices)
 {
     spatialMapMutex.lock();
 
     // Add all clusters which were determined as containing only sensor noise to the spatial map of static objects.
-    for (const auto& cluster : voxelClustersToAdd)
+    for (const auto& index : indices)
     {
+        const auto& cluster = clusters[index];
         for (const auto& voxelCenterPoint : cluster)
         {
             octomap::OcTreeNode* insertedNode = staticObjectsOctree->updateNode(voxelCenterPoint, true);
@@ -926,13 +939,14 @@ void SpatialMapper::addClustersToStaticObjectsMap(std::vector<std::vector<octoma
     spatialMapMutex.unlock();
 }
 
-octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters)
+octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(
+        const std::vector<std::vector<octomap::point3d>>& clusters)
 {
     octomap::ColorOcTree* colorizedClusterOctree = new octomap::ColorOcTree(leafSize);
     
     for (int i = 0; i < clusters.size(); i++)
     {
-        std::vector<octomap::point3d>& cluster = clusters[i];
+        const std::vector<octomap::point3d>& cluster = clusters[i];
 
         int colorIndex = i % voxelClusterColors.size();
         octomap::ColorOcTreeNode::Color& clusterColor = voxelClusterColors[colorIndex];
@@ -948,14 +962,15 @@ octomap::ColorOcTree* SpatialMapper::createVoxelClusterOctree(std::vector<std::v
     return colorizedClusterOctree;
 }
 
-std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters)
+std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(
+        const std::vector<std::vector<octomap::point3d>>& clusters)
 {
     std::vector<BoundingBox> boundingBoxes;
     const float halfLeafSize = leafSize / 2.0f;
 
     for (auto clusterIt = clusters.begin(); clusterIt != clusters.end(); clusterIt++)
     {
-        std::vector<octomap::point3d>& cluster = *clusterIt;
+        const std::vector<octomap::point3d>& cluster = *clusterIt;
 
         float minX = cluster[0].x();
         float maxX = cluster[0].x();
@@ -988,7 +1003,7 @@ std::vector<BoundingBox> SpatialMapper::calculateBoundingBoxes(std::vector<std::
 }
 
 std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> SpatialMapper::extractPointsCorrespondingToBoundingBoxes(
-        std::vector<BoundingBox> boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points)
+        const std::vector<BoundingBox>& boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points)
 {
     std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds;
 
@@ -1011,7 +1026,7 @@ std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> SpatialMapper::extractPointsCo
 
 
 std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
-        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds)
+        const std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr>& clusterClouds)
 {
     std::vector<pcl::PointXYZ> centroids;
     
@@ -1030,15 +1045,15 @@ std::vector<pcl::PointXYZ> SpatialMapper::calculateCentroids(
     return centroids;
 }
 
-std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
-        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds,
-        std::vector<pcl::PointXYZ> clusterCentroids,
+std::vector<ClassificationResult> SpatialMapper::classifyVoxelClusters(
+        const std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr>& clusterClouds,
+        const std::vector<pcl::PointXYZ>& clusterCentroids,
         geometry_msgs::Point sensorPosition)
 {
-    std::vector<ClusterClass> clusterClasses;
+    std::vector<ClassificationResult> classificationResults;
 
     if (clusterClouds.size() == 0)
-        return clusterClasses;
+        return classificationResults;
 
     object3d_detector::ClassifyClusters classificationMsg;
     for (auto& clusterCloud : clusterClouds)
@@ -1071,31 +1086,33 @@ std::vector<ClusterClass> SpatialMapper::classifyVoxelClusters(
             const object3d_detector::ClassificationResult& clusterResult
                     = classificationMsg.response.classificationResults[i];
 
-            clusterClasses.push_back(ClusterClass(clusterResult.objectClass));
-            // TODO: Use probability and tracking id.
+            const ObjectClass objectClass = ObjectClass(clusterResult.objectClass);
+            const float& probability = clusterResult.probability;
+            const int64_t& trackingId = clusterResult.trackingId;
+            classificationResults.push_back(ClassificationResult(objectClass, probability, trackingId));
         }
     }
     else
     {
         for (size_t i = 0; i < clusterClouds.size(); i++)
         {
-            clusterClasses.push_back(ClusterClass::CLASSIFICATION_FAILED);
+            classificationResults.push_back(ClassificationResult());
         }
     }
 
-    return clusterClasses;
+    return classificationResults;
 }
 
 std::vector<size_t> SpatialMapper::selectClustersByClass(
-        std::vector<ClusterClass> clusterClasses,
-        std::unordered_set<ClusterClass> classesToSelect)
+        const std::vector<ClassificationResult>& classificationResults,
+        const std::unordered_set<ObjectClass>& classesToSelect)
 {
     std::vector<size_t> indices;
 
-    for (size_t i = 0; i < clusterClasses.size(); i++)
+    for (size_t i = 0; i < classificationResults.size(); i++)
     {
-        const ClusterClass& clusterClass = clusterClasses[i];
-        if (classesToSelect.find(clusterClass) != classesToSelect.end())
+        const ObjectClass& classOfCurrentCluster = classificationResults[i].objectClass;
+        if (classesToSelect.find(classOfCurrentCluster) != classesToSelect.end())
         {
             indices.push_back(i);
         }
@@ -1106,7 +1123,7 @@ std::vector<size_t> SpatialMapper::selectClustersByClass(
 
 void SpatialMapper::publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<ClassificationResult>& classificationResults,
         ros::Publisher& publisher,
         const ros::Time& timestamp)
 {
@@ -1116,12 +1133,12 @@ void SpatialMapper::publishBoundingBoxes(
         indices.push_back(i);
     }
 
-    publishBoundingBoxes(boundingBoxes, clusterClasses, indices, publisher, timestamp);
+    publishBoundingBoxes(boundingBoxes, classificationResults, indices, publisher, timestamp);
 }
 
 void SpatialMapper::publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<ClassificationResult>& classificationResults,
         const std::vector<size_t>& indices,
         ros::Publisher& publisher,
         const ros::Time& timestamp)
@@ -1176,7 +1193,7 @@ void SpatialMapper::publishBoundingBoxes(
         for(int i = 0; i < 24; i++)
             marker.points.push_back(p[i]);
 
-        marker.color = objectClassColors[clusterClasses[index]];
+        marker.color = objectClassColors[classificationResults[index].objectClass];
 
         // Contrary to what one would assume, this does not scale the points along the x-axis. Instead, it defines the
         // width to use when rendering the lines. A value of 0.02 therefore indicates that a line should have a width of

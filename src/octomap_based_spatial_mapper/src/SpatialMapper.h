@@ -121,12 +121,29 @@ struct BoundingBox
     }
 };
 
-enum ClusterClass
+enum ObjectClass
 {
     CLASSIFICATION_FAILED = -1,
     UNKNOWN = 0,
     HUMAN = 1,
     ROBOT = 2
+};
+
+struct ClassificationResult
+{
+    ObjectClass objectClass;
+    float probability;
+    int64_t trackingId;
+
+    ClassificationResult(
+            ObjectClass _objectClass = ObjectClass::CLASSIFICATION_FAILED,
+            float _probability = 0.0f,
+            int64_t _trackingId = -1
+    ) {
+        objectClass = _objectClass;
+        probability = _probability;
+        trackingId = _trackingId;
+    }
 };
 
 namespace std
@@ -145,11 +162,11 @@ namespace std
     };
 
     template <>
-    struct hash<ClusterClass>
+    struct hash<ObjectClass>
     {
-        std::size_t operator()(const ClusterClass& clusterClass) const
+        std::size_t operator()(const ObjectClass& objectClass) const
         {
-            return static_cast<std::size_t>(clusterClass);
+            return static_cast<std::size_t>(objectClass);
         }
     };
 }
@@ -199,13 +216,13 @@ private:
 
     // Updates the floor height according to the given center points of occupied voxels. The floor is assumed to be at
     // the height of the lowest voxels ever observed.
-    void updateFloorHeight(std::vector<octomap::point3d> voxelCenterPoints);
+    void updateFloorHeight(const std::vector<octomap::point3d>& voxelCenterPoints);
 
     // Removes all voxels corresponding to the floor from the given voxel center points.
-    std::vector<octomap::point3d> removeFloorVoxels(std::vector<octomap::point3d> voxelCenterPointsToFilter);
+    std::vector<octomap::point3d> removeFloorVoxels(const std::vector<octomap::point3d>& voxelCenterPointsToFilter);
 
     // Creates an octree where all voxels denoted by the given voxel center points are marked as occupied.
-    octomap::OcTree* voxelCenterPointsToOctree(std::vector<octomap::point3d> voxelCenterPoints);
+    octomap::OcTree* voxelCenterPointsToOctree(const std::vector<octomap::point3d>& voxelCenterPoints);
 
     // Detects clusters in the given octree (must be expanded and may only contain occupied and unknown voxels).
     std::vector<std::vector<octomap::point3d>> detectVoxelClusters(octomap::OcTree* octreeToCluster);
@@ -213,38 +230,41 @@ private:
     // Removes clusters which contain too less voxels. These clusters contain either only sensor noise or some too small
     // object, so they shouldn't be detected and tracked as a dynamic object.
     std::vector<std::vector<octomap::point3d>> removeSmallVoxelClusters(
-            std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+            const std::vector<std::vector<octomap::point3d>>& voxelClustersToFilter);
 
     // Removes clusters which were very likely detected due to sensor noise. These noisy clusters usually appear next
     // to static objects with most voxels being a neighbor to a static voxel, so they will be filtered out accordingly.
     std::pair<std::vector<std::vector<octomap::point3d>>, std::vector<std::vector<octomap::point3d>>>
-            removeNoiseVoxelClusters(std::vector<std::vector<octomap::point3d>> voxelClustersToFilter);
+            removeNoiseVoxelClusters(const std::vector<std::vector<octomap::point3d>>& voxelClustersToFilter);
     
     // Adds the given voxel clusters to the spatial map of static objects.
-    void addClustersToStaticObjectsMap(std::vector<std::vector<octomap::point3d>> voxelClustersToAdd);
+    void addClustersToStaticObjectsMap(const std::vector<std::vector<octomap::point3d>>& voxelClustersToAdd);
+    void addClustersToStaticObjectsMap(
+            const std::vector<std::vector<octomap::point3d>>& clusters, const std::vector<size_t>& indices);
 
     // Creates a colorized octree where a voxels belonging to the same cluster will have the same color.
-    octomap::ColorOcTree* createVoxelClusterOctree(std::vector<std::vector<octomap::point3d>> clusters);
+    octomap::ColorOcTree* createVoxelClusterOctree(const std::vector<std::vector<octomap::point3d>>& clusters);
 
     // Calculates the bounding box corresponding to each cluster.
-    std::vector<BoundingBox> calculateBoundingBoxes(std::vector<std::vector<octomap::point3d>> clusters);
+    std::vector<BoundingBox> calculateBoundingBoxes(const std::vector<std::vector<octomap::point3d>>& clusters);
 
     // Extracts all points lying inside the given bounding boxes.
     std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> extractPointsCorrespondingToBoundingBoxes(
-        std::vector<BoundingBox> boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points);
+            const std::vector<BoundingBox>& boundingBoxes, pcl::PointCloud<pcl::PointXYZI>::Ptr points);
 
     // Calculates the centroid point of each of the given bounding boxes.
-    std::vector<pcl::PointXYZ> calculateCentroids(std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds);
+    std::vector<pcl::PointXYZ> calculateCentroids(
+            const std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr>& clusterClouds);
 
     // Classifies each of the given voxel clusters.
-    std::vector<ClusterClass> classifyVoxelClusters(
-        std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr> clusterClouds,
-        std::vector<pcl::PointXYZ> clusterCentroids,
+    std::vector<ClassificationResult> classifyVoxelClusters(
+        const std::vector<pcl::PointCloud<pcl::PointXYZI>::Ptr>& clusterClouds,
+        const std::vector<pcl::PointXYZ>& clusterCentroids,
         geometry_msgs::Point sensorPosition);
     
     std::vector<size_t> selectClustersByClass(
-        std::vector<ClusterClass> clusterClasses,
-        std::unordered_set<ClusterClass> classesToSelect);
+        const std::vector<ClassificationResult>& clusterClasses,
+        const std::unordered_set<ObjectClass>& classesToSelect);
 
     // Publishes an Octomap OcTree using a given publisher.
     template<class OctomapT>
@@ -263,12 +283,12 @@ private:
     // Publishes the given bounding boxes.
     void publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<ClassificationResult>& classificationResults,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
     void publishBoundingBoxes(
         const std::vector<BoundingBox>& boundingBoxes,
-        const std::vector<ClusterClass>& clusterClasses,
+        const std::vector<ClassificationResult>& classificationResults,
         const std::vector<size_t>& indices,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
@@ -333,9 +353,9 @@ private:
     float floorHeight = 10000.0;
 
     // Information about the class of tracked objects and a map of the colors to assign to the detected object classes.
-    std::unordered_map<long, boost::circular_buffer<std::vector<ClusterClass>>> objectClassDetectionsPrevFrames;
-    std::unordered_map<long, std::unordered_map<ClusterClass, int>> objectClassDetectionCounts;
-    std::unordered_map<ClusterClass, std_msgs::ColorRGBA> objectClassColors;
+    std::unordered_map<long, boost::circular_buffer<std::vector<ObjectClass>>> objectClassDetectionsPrevFrames;
+    std::unordered_map<long, std::unordered_map<ObjectClass, int>> objectClassDetectionCounts;
+    std::unordered_map<ObjectClass, std_msgs::ColorRGBA> objectClassColors;
 
     // ROS publishers and service clients.
     ros::ServiceClient clusterClassifierService;
