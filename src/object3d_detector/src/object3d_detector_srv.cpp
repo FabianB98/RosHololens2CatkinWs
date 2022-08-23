@@ -409,7 +409,10 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     if (classificationResult.objectClass <= 0)
       continue;
 
-    // TODO: Min, max and centroid need to be moved transformed back into the original coordinate system.
+    // Min, max and centroid need to be translated back into the original coordinate system.
+    const Eigen::Vector4f centroid = feature.centroid + sensorTranslation;
+    const Eigen::Vector4f min = feature.min + sensorTranslation;
+    const Eigen::Vector4f max = feature.max + sensorTranslation;
 
     visualization_msgs::Marker marker;
     marker.header.stamp = ros::Time::now();
@@ -418,30 +421,30 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     marker.id = i;
     marker.type = visualization_msgs::Marker::LINE_LIST;
     geometry_msgs::Point p[24];
-    p[0].x = feature.max[0]; p[0].y = feature.max[1]; p[0].z = feature.max[2];
-    p[1].x = feature.min[0]; p[1].y = feature.max[1]; p[1].z = feature.max[2];
-    p[2].x = feature.max[0]; p[2].y = feature.max[1]; p[2].z = feature.max[2];
-    p[3].x = feature.max[0]; p[3].y = feature.min[1]; p[3].z = feature.max[2];
-    p[4].x = feature.max[0]; p[4].y = feature.max[1]; p[4].z = feature.max[2];
-    p[5].x = feature.max[0]; p[5].y = feature.max[1]; p[5].z = feature.min[2];
-    p[6].x = feature.min[0]; p[6].y = feature.min[1]; p[6].z = feature.min[2];
-    p[7].x = feature.max[0]; p[7].y = feature.min[1]; p[7].z = feature.min[2];
-    p[8].x = feature.min[0]; p[8].y = feature.min[1]; p[8].z = feature.min[2];
-    p[9].x = feature.min[0]; p[9].y = feature.max[1]; p[9].z = feature.min[2];
-    p[10].x = feature.min[0]; p[10].y = feature.min[1]; p[10].z = feature.min[2];
-    p[11].x = feature.min[0]; p[11].y = feature.min[1]; p[11].z = feature.max[2];
-    p[12].x = feature.min[0]; p[12].y = feature.max[1]; p[12].z = feature.max[2];
-    p[13].x = feature.min[0]; p[13].y = feature.max[1]; p[13].z = feature.min[2];
-    p[14].x = feature.min[0]; p[14].y = feature.max[1]; p[14].z = feature.max[2];
-    p[15].x = feature.min[0]; p[15].y = feature.min[1]; p[15].z = feature.max[2];
-    p[16].x = feature.max[0]; p[16].y = feature.min[1]; p[16].z = feature.max[2];
-    p[17].x = feature.max[0]; p[17].y = feature.min[1]; p[17].z = feature.min[2];
-    p[18].x = feature.max[0]; p[18].y = feature.min[1]; p[18].z = feature.max[2];
-    p[19].x = feature.min[0]; p[19].y = feature.min[1]; p[19].z = feature.max[2];
-    p[20].x = feature.max[0]; p[20].y = feature.max[1]; p[20].z = feature.min[2];
-    p[21].x = feature.min[0]; p[21].y = feature.max[1]; p[21].z = feature.min[2];
-    p[22].x = feature.max[0]; p[22].y = feature.max[1]; p[22].z = feature.min[2];
-    p[23].x = feature.max[0]; p[23].y = feature.min[1]; p[23].z = feature.min[2];
+    p[0].x = max[0]; p[0].y = max[1]; p[0].z = max[2];
+    p[1].x = min[0]; p[1].y = max[1]; p[1].z = max[2];
+    p[2].x = max[0]; p[2].y = max[1]; p[2].z = max[2];
+    p[3].x = max[0]; p[3].y = min[1]; p[3].z = max[2];
+    p[4].x = max[0]; p[4].y = max[1]; p[4].z = max[2];
+    p[5].x = max[0]; p[5].y = max[1]; p[5].z = min[2];
+    p[6].x = min[0]; p[6].y = min[1]; p[6].z = min[2];
+    p[7].x = max[0]; p[7].y = min[1]; p[7].z = min[2];
+    p[8].x = min[0]; p[8].y = min[1]; p[8].z = min[2];
+    p[9].x = min[0]; p[9].y = max[1]; p[9].z = min[2];
+    p[10].x = min[0]; p[10].y = min[1]; p[10].z = min[2];
+    p[11].x = min[0]; p[11].y = min[1]; p[11].z = max[2];
+    p[12].x = min[0]; p[12].y = max[1]; p[12].z = max[2];
+    p[13].x = min[0]; p[13].y = max[1]; p[13].z = min[2];
+    p[14].x = min[0]; p[14].y = max[1]; p[14].z = max[2];
+    p[15].x = min[0]; p[15].y = min[1]; p[15].z = max[2];
+    p[16].x = max[0]; p[16].y = min[1]; p[16].z = max[2];
+    p[17].x = max[0]; p[17].y = min[1]; p[17].z = min[2];
+    p[18].x = max[0]; p[18].y = min[1]; p[18].z = max[2];
+    p[19].x = min[0]; p[19].y = min[1]; p[19].z = max[2];
+    p[20].x = max[0]; p[20].y = max[1]; p[20].z = min[2];
+    p[21].x = min[0]; p[21].y = max[1]; p[21].z = min[2];
+    p[22].x = max[0]; p[22].y = max[1]; p[22].z = min[2];
+    p[23].x = max[0]; p[23].y = min[1]; p[23].z = min[2];
     for(int i = 0; i < 24; i++)
       marker.points.push_back(p[i]);
     marker.scale.x = 0.02;
@@ -451,9 +454,9 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     marker_array.markers.push_back(marker);
     
     geometry_msgs::Pose pose;
-    pose.position.x = feature.centroid[0];
-    pose.position.y = feature.centroid[1];
-    pose.position.z = feature.centroid[2];
+    pose.position.x = centroid[0];
+    pose.position.y = centroid[1];
+    pose.position.z = centroid[2];
     pose.orientation.w = 1;
     pose_array.poses.push_back(pose);
   }
