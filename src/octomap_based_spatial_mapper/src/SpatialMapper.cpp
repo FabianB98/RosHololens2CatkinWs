@@ -148,6 +148,7 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     octomapDynamicObjectClustersPublisher = n.advertise<octomap_msgs::Octomap>(OCTOMAP_DYNAMIC_OBJECTS_CLUSTERS_TOPIC, 10);
     boundingBoxDynamicObjectClustersPublisher = n.advertise<visualization_msgs::MarkerArray>(BOUNDING_BOX_DYNAMIC_OBJECT_CLUSTERS_TOPIC, 10);
     dynamicClusterCentroidsPublisher = n.advertise<geometry_msgs::PoseArray>(DYNAMIC_CLUSTER_CENTROIDS_CLUSTERS_OF_INTEREST_TOPIC, 10);
+    detectionResultsPublisher = n.advertise<object3d_detector::DetectionResults>(DETECTION_RESULTS_TOPIC, 10);
 }
 
 SpatialMapper::~SpatialMapper()
@@ -308,6 +309,8 @@ void SpatialMapper::handlePointCloudFrame(const hololens_depth_data_receiver_msg
     publishBoundingBoxes(boundingBoxes, classificationResults, clusterIndicesClustersOfInterest,
             boundingBoxDynamicObjectClustersPublisher, time);
     publishCentroids(clusterCentroids, clusterIndicesClustersOfInterest, dynamicClusterCentroidsPublisher, time);
+    publishDetectionResults(boundingBoxes, clusterCentroids, classificationResults, clusterIndicesClustersOfInterest,
+            detectionResultsPublisher, time);
 
     // Delete all octrees which we only used during this frame to ensure that we don't use more and more RAM over time.
     delete currentFrameOctree;
@@ -1324,6 +1327,48 @@ void SpatialMapper::publishCentroids(
     }
 
     publisher.publish(poseArray);
+}
+
+void SpatialMapper::publishDetectionResults(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<pcl::PointXYZ>& centroids,
+        const std::vector<ClassificationResult>& classificationResults,
+        const std::vector<size_t>& indices,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp)
+{
+    object3d_detector::DetectionResults detectionResults;
+    detectionResults.header.stamp = timestamp;
+    detectionResults.header.frame_id = "hololens_world";
+
+    for (const auto& index : indices)
+    {
+        const BoundingBox& boundingBox = boundingBoxes[index];
+        const pcl::PointXYZ& centroid = centroids[index];
+        const ClassificationResult& classificationResult = classificationResults[index];
+
+        object3d_detector::DetectionResult detectionResult;
+
+        detectionResult.centroid.x = centroid.x;
+        detectionResult.centroid.y = centroid.y;
+        detectionResult.centroid.z = centroid.z;
+
+        detectionResult.boundingBoxMin.x = boundingBox.min.x;
+        detectionResult.boundingBoxMin.y = boundingBox.min.y;
+        detectionResult.boundingBoxMin.z = boundingBox.min.z;
+
+        detectionResult.boundingBoxMax.x = boundingBox.max.x;
+        detectionResult.boundingBoxMax.y = boundingBox.max.y;
+        detectionResult.boundingBoxMax.z = boundingBox.max.z;
+
+        detectionResult.classificationResult.objectClass = classificationResult.objectClass;
+        detectionResult.classificationResult.probability = classificationResult.probability;
+        detectionResult.classificationResult.trackingId = classificationResult.trackingId;
+
+        detectionResults.detections.push_back(detectionResult);
+    }
+
+    publisher.publish(detectionResults);
 }
 
 void SpatialMapper::setUpdateSpatialMap(bool _updateSpatialMap)

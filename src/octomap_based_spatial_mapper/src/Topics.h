@@ -14,6 +14,8 @@
 #define DYNAMIC_CLUSTER_CENTROIDS_ROBOT_TOPIC "dynamicClusterCentroidsRobot"
 #define DYNAMIC_CLUSTER_CENTROIDS_UNKNOWN_TOPIC "dynamicClusterCentroidsUnknown"
 
+#define DETECTION_RESULTS_TOPIC "detections"
+
 #define CLUSTER_CLASSIFICATION_SERVICE_NAME "clustersClassifier/classifyClusters"
 
 #define ENABLE_SPATIAL_MAP_UPDATES_TOPIC "enableSpatialMapUpdates"

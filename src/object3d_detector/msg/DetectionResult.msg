@@ -1,0 +1,5 @@
+geometry_msgs/Point centroid
+geometry_msgs/Point boundingBoxMin
+geometry_msgs/Point boundingBoxMax
+
+ClassificationResult classificationResult

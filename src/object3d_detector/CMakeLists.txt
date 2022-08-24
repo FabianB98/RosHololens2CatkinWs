@@ -23,6 +23,8 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 add_message_files(
   FILES
   ClassificationResult.msg
+  DetectionResult.msg
+  DetectionResults.msg
 )
 
 add_service_files(

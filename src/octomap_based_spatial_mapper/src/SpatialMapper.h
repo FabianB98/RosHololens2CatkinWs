@@ -22,6 +22,7 @@
 #include "bayes_people_tracker/TrackClusters.h"
 #include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
 #include "object3d_detector/ClassifyClusters.h"
+#include "object3d_detector/DetectionResults.h"
 
 #include <boost/circular_buffer.hpp>
 #include <boost/thread.hpp>
@@ -343,6 +344,15 @@ private:
         const std::vector<size_t>& indices,
         ros::Publisher& publisher,
         const ros::Time& timestamp);
+    
+    // Publishes the given bounding boxes, centroids and detected classes as a DetectionResults message.
+    void publishDetectionResults(
+        const std::vector<BoundingBox>& boundingBoxes,
+        const std::vector<pcl::PointXYZ>& centroids,
+        const std::vector<ClassificationResult>& classificationResults,
+        const std::vector<size_t>& indices,
+        ros::Publisher& publisher,
+        const ros::Time& timestamp);
 
     // Hyper parameters for insertion of point clouds into the octree data structure.
     double leafSize;
@@ -412,6 +422,7 @@ private:
     ros::Publisher octomapDynamicObjectClustersPublisher;
     ros::Publisher boundingBoxDynamicObjectClustersPublisher;
     ros::Publisher dynamicClusterCentroidsPublisher;
+    ros::Publisher detectionResultsPublisher;
 
     // Sequence numbers used for publishing the results.
     uint32_t octomapSequenceNumber;

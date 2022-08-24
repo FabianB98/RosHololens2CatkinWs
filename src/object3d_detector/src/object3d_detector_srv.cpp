@@ -39,6 +39,8 @@
 // Service request and response messages
 #include "object3d_detector/ClassificationResult.h"
 #include "object3d_detector/ClassifyClusters.h"
+#include "object3d_detector/DetectionResult.h"
+#include "object3d_detector/DetectionResults.h"
 #include "bayes_people_tracker/TrackClusters.h"
 // Point cloud frame message (contains point cloud and sensor position).
 #include "hololens_depth_data_receiver_msgs/PointCloudFrame.h"
@@ -102,6 +104,7 @@ private:
   ros::Subscriber point_cloud_sub_;
   ros::Publisher pose_array_pub_;
   ros::Publisher marker_array_pub_;
+  ros::Publisher detection_results_pub_;
   ros::ServiceServer classification_service;
   ros::ServiceClient tracking_service;
   
@@ -157,6 +160,7 @@ Object3dDetector::Object3dDetector() {
     
     marker_array_pub_ = private_nh.advertise<visualization_msgs::MarkerArray>("markers", 100);
     pose_array_pub_ = private_nh.advertise<geometry_msgs::PoseArray>("poses", 100);
+    detection_results_pub_ = private_nh.advertise<object3d_detector::DetectionResults>("detections", 100);
   }
 
   classification_service = private_nh.advertiseService("classifyClusters", &Object3dDetector::classifyClustersCallback, this);
@@ -401,6 +405,10 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
 
   visualization_msgs::MarkerArray marker_array;
   geometry_msgs::PoseArray pose_array;
+  object3d_detector::DetectionResults detection_results;
+  detection_results.header.stamp = ros::Time::now();
+  detection_results.header.frame_id = frame_id_;
+
   for (size_t i = 0; i < classificationsMultiFrame.size(); i++)
   {
     const Feature& feature = features[i];
@@ -459,6 +467,19 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     pose.position.z = centroid[2];
     pose.orientation.w = 1;
     pose_array.poses.push_back(pose);
+
+    object3d_detector::DetectionResult detectionResult;
+    detectionResult.centroid.x = centroid[0];
+    detectionResult.centroid.y = centroid[1];
+    detectionResult.centroid.z = centroid[2];
+    detectionResult.boundingBoxMin.x = min[0];
+    detectionResult.boundingBoxMin.y = min[1];
+    detectionResult.boundingBoxMin.z = min[2];
+    detectionResult.boundingBoxMax.x = max[0];
+    detectionResult.boundingBoxMax.y = max[1];
+    detectionResult.boundingBoxMax.z = max[2];
+    detectionResult.classificationResult = classificationResult;
+    detection_results.detections.push_back(detectionResult);
   }
 
   if(marker_array.markers.size()) {
@@ -469,6 +490,7 @@ void Object3dDetector::pointCloudCallback(const hololens_depth_data_receiver_msg
     pose_array.header.frame_id = frame_id_;
     pose_array_pub_.publish(pose_array);
   }
+  detection_results_pub_.publish(detection_results);
 }
 
 const int nested_regions_ = 14;
