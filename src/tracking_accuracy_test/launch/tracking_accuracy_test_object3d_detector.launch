@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find object3d_detector)/launch/object3d_detector_multiclass.launch"/>
+    <include file="$(find udp-to-ros)/launch/udp_server.launch"/>
+    <node pkg="tracking_accuracy_test" type="tracking_accuracy_test" name="tracking_accuracy_test" respawn="true" output="screen"/>
+</launch>

@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="udp-to-ros" type="udp_server" name="udp_listener" respawn="true" output="screen"/>
+
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find udp-to-ros)/config/marker_position_visualization.rviz" respawn="true"/>
+    <node pkg="tf" type="static_transform_publisher" name="rviz_tf" args="0 0 0 0 0 0 /map /world 100"/>
+</launch>
