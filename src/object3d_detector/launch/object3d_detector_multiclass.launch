@@ -21,7 +21,7 @@
         <param name="target_frame" type="string" value="odom"/>
     </node>
     <rosparam command="load" file="$(find object3d_detector)/config/object3d_detector.yaml"/>
-    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="bayes_people_tracker" output="screen" respawn="false">
+    <node pkg="bayes_people_tracker" type="bayes_people_tracker" name="bayes_people_tracker" output="screen" respawn="true">
         <param name="base_link" type="string" value="odom"/>
         <param name="target_frame" type="string" value="odom"/>
     </node>

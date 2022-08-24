@@ -1,0 +1,13 @@
+<launch>
+    <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
+
+    <rosparam file="$(find hololens_stereo_image_receiver)/config/default_parameters.yaml" subst_value="true"/>
+    <node name="stereo_image_receiver" pkg="hololens_stereo_image_receiver" type="stereo_image_receiver" respawn="true"/>
+
+    <rosparam file="$(find hololens_depth_data_receiver)/config/hololens2.yaml"/>
+    <node name="depth_data_receiver" pkg="hololens_depth_data_receiver" type="faster_depth_data_receiver" respawn="true"/>
+
+    <node name="hololens_rviz_tf1" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0 1.5707963 /map /hololens_world 100"/>
+    <node name="hololens_rviz_tf2" pkg="tf" type="static_transform_publisher" args="0 0 0 -1.5707963 0 0 /hololens /map 100"/>
+    <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find hololens_stereo_image_receiver)/config/stereo_image_receiver_gui.perspective" respawn="true"/>
+</launch>
