@@ -14,7 +14,11 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   udp-to-ros
+  pcl_ros
+  visualization_msgs
 )
+
+find_package(PCL REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
