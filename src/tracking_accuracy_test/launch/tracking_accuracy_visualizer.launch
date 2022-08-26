@@ -1,0 +1,8 @@
+<launch>
+    <node pkg="tracking_accuracy_test" type="tracking_accuracy_visualizer" name="tracking_accuracy_visualizer" respawn="true" output="screen">
+        <param name="resultsPathPrefixRelativeToHome" type="string" value="/trackingAccuracy/Person Moving with Marker 1 (octomap_based_spatial_mapper without map updates)/"/>
+    </node>
+
+    <node name="hololens_rviz_tf1" pkg="tf" type="static_transform_publisher" args="0 0 0 0 0 1.5707963 /map /hololens_world 100"/>
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find tracking_accuracy_test)/launch/tracking_accuracy_visualizer.rviz"/>
+</launch>

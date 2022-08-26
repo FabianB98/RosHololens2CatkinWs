@@ -244,7 +244,7 @@ void savePoints(std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> >& associate
 
     for (size_t i = 0; i < associatedPoints.size(); i++) {
         pointCloudObjectDetection.push_back(associatedPoints[i].first);
-        pointCloudExternalTrackingSystem.push_back(associatedPoints[i].second);
+        pointCloudExternalTrackingSystem.push_back(transformPoint(associatedPoints[i].second, transformation));
     }
 
     pcl::io::savePCDFileBinary(filenamePrefix + "_objectDetection.pcd", pointCloudObjectDetection);
@@ -320,5 +320,5 @@ int main(int argc, char** argv) {
 
     calculateTrackingErrorAndSaveResults();
       
-    return 0; 
+    return 0;
 }
