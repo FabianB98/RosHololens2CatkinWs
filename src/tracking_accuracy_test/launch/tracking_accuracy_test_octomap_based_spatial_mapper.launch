@@ -1,5 +1,10 @@
 <launch>
     <include file="$(find octomap_based_spatial_mapper)/launch/octomap_based_spatial_mapper_with_rqt_gui.launch"/>
     <include file="$(find udp-to-ros)/launch/udp_server.launch"/>
-    <node pkg="tracking_accuracy_test" type="tracking_accuracy_test" name="tracking_accuracy_test" respawn="true" output="screen"/>
+
+    <node pkg="tracking_accuracy_test" type="tracking_accuracy_test" name="tracking_accuracy_test" respawn="true" output="screen">
+        <param name="objectDetectionsTopic" type="string" value="detections"/>
+        <param name="objectDetectionsCoordSystemYAxisUp" type="bool" value="true"/>
+        <param name="rvizBaseFrameId" type="string" value="map"/>
+    </node>
 </launch>

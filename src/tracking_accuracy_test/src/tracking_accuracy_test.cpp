@@ -1,6 +1,12 @@
 #include <cmath>
+#include <iostream>
 #include <math.h>
+#include <sstream>
 #include <vector>
+
+#include "boost/filesystem/fstream.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
 
 #include <ros/ros.h>
 
@@ -14,13 +20,9 @@
 #include <pcl/common/centroid.h>
 #include <pcl/common/transforms.h>
 #include <pcl/registration/transformation_estimation_2D.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 #define TRACKING_SYSTEM_MARKER_POSITION_TOPIC "trackingSystemMarkerPosition"
-#define OBJECT_DETECTIONS_TOPIC "object3d_detector/detections"
-
-// Set to true if the y axis is the upwards facing axis (i.e. for octomap_based_spatial_mapper).
-// Set to false if the z axis is the upwards facing axis (i.e. for object3d_detector).
-#define OBJECT_DETECTIONS_COORD_SYSTEM_Y_AXIS_UP false
 
 #define TRACKING_SYSTEM_MARKER_STATIONARY_TEST_NUM_FRAMES 100
 #define TRACKING_SYSTEM_MARKER_STATIONARY_TEST_AVG_DISTANCE_THRESHOLD 0.01 // Unit: meters
@@ -30,7 +32,11 @@
 
 #define TRANSFORMATION_ESTIMATION_NUM_CORRESPONDENCES 4
 
-#define TRACKING_SYSTEM_MARKER_FRAME_ID "odom"
+#define RESULTS_PATH_PREFIX_RELATIVE_TO_HOME "/trackingAccuracy/"
+
+std::string objectDetectionsTopic;
+bool objectDetectionsCoordSystemYAxisUp;
+std::string rvizBaseFrameId;
 
 pcl::PointXYZ lastTrackingPosition;
 ros::Time lastTrackingTime;
@@ -40,8 +46,9 @@ pcl::PointCloud<pcl::PointXYZ> lastTrackingPositionsCloud;
 size_t lastTrackingPositionsCloudInsertionIndex = 0;
 
 bool transformationEstimated = false;
-Eigen::Matrix4f transformation;
+Eigen::Affine3f transformation;
 
+std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> > associatedPointsAll;
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> > associatedPointsTransformationEstimation;
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> > associatedPointsStationary;
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> > associatedPointsMoving;
@@ -56,7 +63,7 @@ void trackingSystemMarkerPositionCallback(const geometry_msgs::PointStamped::Con
     // determine the tracking error for the plane perpendicular to the upwards facing axis (which is the XY plane in the
     // tracking system's coordinate system).
     lastTrackingPosition = pcl::PointXYZ(msg->point.x, msg->point.y, 0.0);
-    lastTrackingTime = msg->header.stamp;
+    lastTrackingTime = ros::Time::now(); // Using the timestamp stored in msg causes issues when playing back a rosbag.
 
     // Determine whether the marker is somewhat stationary (used to determine the steady-state error).
     pcl::PointXYZ trackingPosition = pcl::PointXYZ(msg->point.x, msg->point.y, msg->point.z);
@@ -99,9 +106,7 @@ void trackingSystemMarkerPositionCallback(const geometry_msgs::PointStamped::Con
         trackingSystemMarkerStationary = markerStationaryNew;
 
         if (transformationEstimated) {
-            Eigen::Affine3f affineTransformation;
-            affineTransformation.matrix() = transformation;
-            pcl::PointXYZ trackingPositionTransformed = transformPoint(trackingPosition, affineTransformation);
+            pcl::PointXYZ trackingPositionTransformed = transformPoint(trackingPosition, transformation);
 
             // We don't have any transformation information regarding the height (see comment further above in this
             // method for more information), so we don't know at which height in the HoloLens’s world coordinate
@@ -110,7 +115,7 @@ void trackingSystemMarkerPositionCallback(const geometry_msgs::PointStamped::Con
             visualization_msgs::MarkerArray markerArray;
             visualization_msgs::Marker marker;
             marker.header.stamp = ros::Time::now();
-            marker.header.frame_id = TRACKING_SYSTEM_MARKER_FRAME_ID;
+            marker.header.frame_id = rvizBaseFrameId;
             marker.ns = "externalTrackingSystem";
             marker.id = 0;
             marker.type = visualization_msgs::Marker::LINE_LIST;
@@ -160,11 +165,13 @@ void objectDetectionsCallback(const object3d_detector::DetectionResults::ConstPt
 
         if (detectionResult.classificationResult.objectClass == 1 /* Human */) {
             pcl::PointXYZ detectedCentroid;
-            if (OBJECT_DETECTIONS_COORD_SYSTEM_Y_AXIS_UP) {
+            if (objectDetectionsCoordSystemYAxisUp) {
                 detectedCentroid = pcl::PointXYZ(detectionResult.centroid.x, -detectionResult.centroid.z, 0.0);
             } else {
                 detectedCentroid = pcl::PointXYZ(detectionResult.centroid.x, detectionResult.centroid.y, 0.0);
             }
+
+            associatedPointsAll.push_back(std::make_pair(detectedCentroid, lastTrackingPosition));
 
             bool correspondenceUsedForTransformationDetection = trackingSystemMarkerStationary
                     && trackingSystemMarkerMovedSinceLastDetection
@@ -189,7 +196,7 @@ void objectDetectionsCallback(const object3d_detector::DetectionResults::ConstPt
 
                     pcl::registration::TransformationEstimation2D<pcl::PointXYZ, pcl::PointXYZ, float> estimation;
                     estimation.estimateRigidTransformation(
-                            trackingSystemPoints, detectionPoints, correspondences, transformation);
+                            trackingSystemPoints, detectionPoints, correspondences, transformation.matrix());
                     transformationEstimated = true;
 
                     ROS_INFO("Transformation estimated! Marker positions will be published from now on.");
@@ -210,22 +217,108 @@ void objectDetectionsCallback(const object3d_detector::DetectionResults::ConstPt
     }
 }
 
+std::pair<double, double> calculateError(std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> >& associatedPoints) {
+    double summedDistance = 0.0;
+    double maxDistance = 0.0;
+
+    for (size_t i = 0; i < associatedPoints.size(); i++) {
+        const pcl::PointXYZ& pointFromObjectDetection = associatedPoints[i].first;
+        pcl::PointXYZ pointFromTrackingSystem = transformPoint(associatedPoints[i].second, transformation);
+
+        // Z axis can be left out as we're only comparing points with respect to the XY plane.
+        double diffX = pointFromObjectDetection.x - pointFromTrackingSystem.x;
+        double diffY = pointFromObjectDetection.y - pointFromTrackingSystem.y;
+        double distance = sqrt(diffX * diffX + diffY * diffY);
+
+        summedDistance += distance;
+        maxDistance = std::max(maxDistance, distance);
+    }
+
+    double avgDistance = summedDistance / associatedPoints.size();
+    return std::make_pair(avgDistance, maxDistance);
+}
+
+void savePoints(std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ> >& associatedPoints, std::string filenamePrefix) {
+    pcl::PointCloud<pcl::PointXYZ> pointCloudObjectDetection;
+    pcl::PointCloud<pcl::PointXYZ> pointCloudExternalTrackingSystem;
+
+    for (size_t i = 0; i < associatedPoints.size(); i++) {
+        pointCloudObjectDetection.push_back(associatedPoints[i].first);
+        pointCloudExternalTrackingSystem.push_back(associatedPoints[i].second);
+    }
+
+    pcl::io::savePCDFileBinary(filenamePrefix + "_objectDetection.pcd", pointCloudObjectDetection);
+    pcl::io::savePCDFileBinary(filenamePrefix + "_externalTrackingSystem.pcd", pointCloudExternalTrackingSystem);
+}
+
+void calculateTrackingErrorAndSaveResults() {
+    std::string home = std::string(getenv("HOME"));
+    std::string directory = home + RESULTS_PATH_PREFIX_RELATIVE_TO_HOME;
+    boost::filesystem::create_directories(directory);
+
+    savePoints(associatedPointsAll, directory + "all");
+    savePoints(associatedPointsTransformationEstimation, directory + "registration");
+    savePoints(associatedPointsStationary, directory + "stationary");
+    savePoints(associatedPointsMoving, directory + "moving");
+
+    std::pair<double, double> errorAll = calculateError(associatedPointsAll);
+    std::pair<double, double> errorRegistration = calculateError(associatedPointsTransformationEstimation);
+    std::pair<double, double> errorStationary = calculateError(associatedPointsStationary);
+    std::pair<double, double> errorMoving = calculateError(associatedPointsMoving);
+
+    std::stringstream ss;
+    ss << "Total error: " << errorAll.first << "m (avg)   "
+            << errorAll.second << "m (max)   (calculated on "
+            << associatedPointsAll.size() << " measurements)" << std::endl;
+    ss << "Registration error: " << errorRegistration.first << "m (avg)   "
+            << errorRegistration.second << "m (max)   (calculated on "
+            << associatedPointsTransformationEstimation.size() << " measurements)" << std::endl;
+    ss << "Stationary error: " << errorStationary.first << "m (avg)   "
+            << errorStationary.second << "m (max)   (calculated on "
+            << associatedPointsStationary.size() << " measurements)" << std::endl;
+    ss << "Moving error: " << errorMoving.first << "m (avg)   "
+            << errorMoving.second << "m (max)   (calculated on "
+            << associatedPointsMoving.size() << " measurements)" << std::endl;
+    std::string trackingErrorFileContents = ss.str();
+
+    // ROS_INFO won't work after spin has finished, so we'll have to resort to logging via standard C++ console output.
+    std::cout << trackingErrorFileContents;
+
+    boost::filesystem::ofstream trackingErrorFile(directory + "trackingError.txt");
+    trackingErrorFile << trackingErrorFileContents;
+    trackingErrorFile.close();
+}
+
 int main(int argc, char** argv) { 
     ros::init(argc, argv, "tracking_accuracy_test");
 
-    ros::NodeHandle nodeHandle = ros::NodeHandle();
+    ros::NodeHandle publicNodeHandle = ros::NodeHandle();
+    ros::NodeHandle privateNodeHandle = ros::NodeHandle("~");
+
+    if (!privateNodeHandle.getParam("objectDetectionsTopic", objectDetectionsTopic)) {
+        ROS_ERROR("No value for parameter objectDetectionsTopic found!");
+        return 1;
+    }
+    if (!privateNodeHandle.getParam("objectDetectionsCoordSystemYAxisUp", objectDetectionsCoordSystemYAxisUp)) {
+        ROS_ERROR("No value for parameter objectDetectionsCoordSystemYAxisUp found!");
+        return 1;
+    }
+    if (!privateNodeHandle.getParam("rvizBaseFrameId", rvizBaseFrameId)) {
+        ROS_ERROR("No value for parameter rvizBaseFrameId found!");
+        return 1;
+    }
 
     ros::Subscriber trackingSystemMarkerPositionSubscriber
-            = nodeHandle.subscribe(TRACKING_SYSTEM_MARKER_POSITION_TOPIC, 10, trackingSystemMarkerPositionCallback);
+            = publicNodeHandle.subscribe(TRACKING_SYSTEM_MARKER_POSITION_TOPIC, 10, trackingSystemMarkerPositionCallback);
     ros::Subscriber objectDetectionsSubscriber
-            = nodeHandle.subscribe(OBJECT_DETECTIONS_TOPIC, 10, objectDetectionsCallback);
+            = publicNodeHandle.subscribe(objectDetectionsTopic, 10, objectDetectionsCallback);
 
     trackingSystemMarkerPositionPublisher
-            = nodeHandle.advertise<visualization_msgs::MarkerArray>("trackingSystemMarkerPositionRegistered", 100);
+            = publicNodeHandle.advertise<visualization_msgs::MarkerArray>("trackingSystemMarkerPositionRegistered", 100);
 
     ros::spin();
 
-    // TODO: Calculate average tracking error and average steady-state error.
+    calculateTrackingErrorAndSaveResults();
       
     return 0; 
 }
