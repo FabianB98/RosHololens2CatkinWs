@@ -7,8 +7,8 @@ int main(int argc, char **argv)
 
     ros::NodeHandle n;
 
-    ros::Subscriber shortThrowPointCloudSubscriber = n.subscribe(SHORT_THROW_POINT_CLOUD_FRAME_TOPIC, 10, pointCloudFrameCallback);
-    ros::Subscriber longThrowPointCloudSubscriber = n.subscribe(LONG_THROW_POINT_CLOUD_FRAME_TOPIC, 10, pointCloudFrameCallback);
+    ros::Subscriber shortThrowPointCloudSubscriber = n.subscribe(SHORT_THROW_POINT_CLOUD_FRAME_TOPIC, 1, pointCloudFrameCallback);
+    ros::Subscriber longThrowPointCloudSubscriber = n.subscribe(LONG_THROW_POINT_CLOUD_FRAME_TOPIC, 1, pointCloudFrameCallback);
     ros::Subscriber enableSpatialMapUpdatesSubscriber = n.subscribe(ENABLE_SPATIAL_MAP_UPDATES_TOPIC, 10, enableSpatialMapUpdatesCallback);
     ros::Subscriber clearSpatialMapSubscriber = n.subscribe(CLEAR_SPATIAL_MAP_TOPIC, 10, clearSpatialMapCallback);
 
