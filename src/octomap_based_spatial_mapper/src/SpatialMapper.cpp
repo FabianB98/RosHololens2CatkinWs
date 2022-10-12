@@ -121,6 +121,13 @@ SpatialMapper::SpatialMapper(ros::NodeHandle n)
     robotColor.a = 1.0;
     objectClassColors[ObjectClass::ROBOT] = robotColor;
 
+    std_msgs::ColorRGBA ballColor;
+    ballColor.r = 1.0;
+    ballColor.g = 0.0;
+    ballColor.b = 1.0;
+    ballColor.a = 1.0;
+    objectClassColors[ObjectClass::BALL] = ballColor;
+
     std_msgs::ColorRGBA unknownColor;
     unknownColor.r = 0.5;
     unknownColor.g = 0.5;

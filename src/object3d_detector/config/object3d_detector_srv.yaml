@@ -11,6 +11,10 @@ clustersClassifier:
             class_id: 2
             model_file: "$(find object3d_detector)/libsvm/robot_hololens.model"
             range_file: "$(find object3d_detector)/libsvm/robot_hololens.range"
+        ball:
+            class_id: 3
+            model_file: "$(find object3d_detector)/libsvm/ball_hololens.model"
+            range_file: "$(find object3d_detector)/libsvm/ball_hololens.range"
 
 # Configuration for the tracker
 clustersTrackerAllClassification:

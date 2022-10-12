@@ -243,6 +243,13 @@ Object3dDetector::Object3dDetector() {
   robotColor.a = 1.0;
   objectClassColors[2] = robotColor;
 
+  std_msgs::ColorRGBA ballColor;
+  ballColor.r = 1.0;
+  ballColor.g = 0.0;
+  ballColor.b = 1.0;
+  ballColor.a = 1.0;
+  objectClassColors[3] = ballColor;
+
   std_msgs::ColorRGBA unknownColor;
   unknownColor.r = 0.5;
   unknownColor.g = 0.5;
@@ -1040,6 +1047,10 @@ std::vector<object3d_detector::ClassificationResult> Object3dDetector::classifyM
 int main(int argc, char **argv) {
   ros::init(argc, argv, "object3d_detector");
   Object3dDetector d;
-  ros::spin();
+
+  //ros::spin();
+  ros::MultiThreadedSpinner spinner(0);
+  spinner.spin();
+
   return 0;
 }

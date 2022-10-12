@@ -134,7 +134,8 @@ enum ObjectClass
     CLASSIFICATION_FAILED = -1,
     UNKNOWN = 0,
     HUMAN = 1,
-    ROBOT = 2
+    ROBOT = 2,
+    BALL = 3
 };
 
 struct ClassificationResult
